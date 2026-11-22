@@ -1,0 +1,5 @@
+/target/
+/dist/
+/vendor/resonance/target/
+*.log
+

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Simple Modern Equalizer
+Comment=System-wide audio equalizer
+Exec=simpledarkeq
+Icon=simple-modern-equalizer
+Terminal=false
+Type=Application
+Categories=AudioVideo;Audio;

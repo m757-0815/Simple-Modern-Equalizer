@@ -1,0 +1,182 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/resonance-dsp",
+    "crates/resonance-preset",
+    "crates/resonance-autoeq",
+    "crates/resonance-ipc",
+    "crates/resonance-reference",
+    "crates/resonance-daemon",
+    "crates/resonance-apo",
+    "crates/resonance-cli",
+    "crates/resonance-tui",
+    "crates/resonance-gui",
+    "crates/resonance-tray",
+    "crates/resonance-e2e",
+    "xtask",
+]
+
+[workspace.package]
+version = "0.11.2"
+edition = "2024"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/ealtun21/resonance"
+rust-version = "1.85"
+
+# Workspace lint policy. `clippy::pedantic` is enabled at warn (and escalated to
+# deny by `make check`'s `-D warnings`). The allows below are deliberate: each
+# either has no idiomatic alternative in this DSP/audio code or flags nothing
+# actionable here. Lints that DO catch real problems (float_cmp, ptr alignment,
+# pass-by-value, …) are left ACTIVE and exempted only at justified call sites
+# with a `#[allow(…)]` + reason, so they keep working on new code.
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+
+# Lossy numeric casts are pervasive and intentional: audio samples <-> buffer
+# indices, f64 <-> f32 at stage boundaries, and waveform generation in tests.
+# These fire on every such cast and catch nothing real, so allow them globally.
+# (Raw-pointer alignment casts are NOT covered here — `cast_ptr_alignment` stays
+# active and is exempted per-site in resonance-apo, the only place it occurs.)
+cast_possible_truncation = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+cast_possible_wrap = "allow"
+
+# A maintainability nudge, not a correctness lint. The long functions here are
+# egui/ratatui render routines that read more clearly as one top-to-bottom pass
+# than split into single-call helpers.
+too_many_lines = "allow"
+
+# Single-character bindings are the established notation in this codebase's two
+# dense domains: DSP/EQ math (biquad coeffs a0..a2/b0..b2, x/y/w/q/r) and 2D
+# rendering geometry (p, r, ui). Renaming them to satisfy the lint would obscure
+# the math, not clarify it. Catches nothing actionable here.
+many_single_char_names = "allow"
+
+# Several config/UI-state structs carry many *independent* boolean toggles
+# (visibility, lock, enable flags). The lint suggests folding them into an enum
+# or state machine, but they are genuinely orthogonal switches — an enum would be
+# artificial. Allowed for structs and for the few render helpers taking flag args.
+struct_excessive_bools = "allow"
+fn_params_excessive_bools = "allow"
+
+# Clippy 1.99 nudge for `assert!(x.is_empty())` in tests; its suggested rewrite
+# (`assert_eq!(x, [] as [String; 0])`) reads worse than the original. Style only.
+assert_is_empty = "allow"
+
+[workspace.dependencies]
+# DSP
+biquad = "0.6"
+rustfft = "6"
+# Async sample-rate conversion (sinc/FFT) for capture↔playback rate
+# reconciliation. Pure Rust, allocation-free hot path via process_into_buffer.
+rubato = "3"
+# WAV decoding for convolution impulse responses. Pure Rust.
+hound = "3"
+
+# Shared-memory control bridge (daemon → Windows APO)
+memmap2 = "0.9"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+postcard = { version = "1", features = ["use-std"] }
+toml = "1.1"
+
+# Async / runtime. The daemon is the only tokio user and runs a current-thread
+# runtime, so we enable exactly the features it needs rather than "full" (which
+# drags in the multi-thread scheduler, process, io-std, test-util, …). Smaller
+# build and binary.
+tokio = { version = "1", default-features = false, features = [
+    "rt",
+    "macros",
+    "net",
+    "sync",
+    "time",
+    "signal",
+    "io-util",
+    "fs",
+] }
+
+# TUI
+ratatui = "0.30"
+crossterm = "0.29"
+
+# GUI
+# `persistence` lets eframe save egui memory (panel sizes, etc.) between runs.
+eframe = { version = "0.34", features = ["persistence"] }
+egui = "0.34"
+
+# Audio / PipeWire (Linux backend; gated to cfg(target_os = "linux") in
+# `crates/resonance-daemon/Cargo.toml`).
+pipewire = "0.10"
+spa = { version = "0.10", package = "libspa" }
+spa-sys = { version = "0.10", package = "libspa-sys" }
+
+# Audio / CoreAudio (macOS backend, via cpal cross-platform abstraction).
+cpal = "0.17"
+
+# macOS Core Audio Process Tap API (macOS 14.2+) — taps system audio output
+# natively so the daemon can EQ all app audio without BlackHole / kext.
+objc2 = "0.6"
+objc2-foundation = "0.3"
+objc2-core-audio = "0.3"
+objc2-core-foundation = "0.3"
+objc2-core-audio-types = "0.3"
+
+# Process-existence probing without /proc (kill(pid, 0)).
+libc = "0.2"
+
+# Real-time audio ring buffer (lock-free SPSC)
+rtrb = "0.3"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# CLI
+clap = { version = "4", features = ["derive", "string"] }
+clap_complete = "4"
+
+# HTTP (AutoEq + squig.link download)
+ureq = "3"
+serde_json = "1"
+
+# Test utilities (dev only)
+approx = "0.5"
+criterion = "0.7"
+
+# System-tray icon. Linux uses ksni (StatusNotifierItem, no GTK); Windows/macOS
+# use tray-icon (native Shell_NotifyIcon / NSStatusItem).
+ksni = "0.2"
+tray-icon = "0.19"
+winit = "0.30"
+
+[profile.release]
+opt-level = "z"
+lto = true
+panic = "abort"
+strip = true
+codegen-units = 1
+
+# Live-audio e2e builds (`cargo xtask e2e`): release-speed DSP so 192 kHz ×
+# 16 ch never xruns, with fast incremental rebuilds. Rust has no fast-math,
+# so output matches release builds bit for bit.
+[profile.e2e-build]
+inherits = "release"
+opt-level = 3
+lto = false
+codegen-units = 16
+incremental = true
+strip = false
+
+# The Windows APO is loaded into Microsoft's audiodg.exe; a panic there must not
+# abort the process. This profile keeps unwinding so the APO's catch_unwind
+# guards turn a panic into an error HRESULT instead of killing audio. Build the
+# APO DLL with `--profile apo`.
+[profile.apo]
+inherits = "release"
+panic = "unwind"

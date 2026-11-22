@@ -1,0 +1,96 @@
+[package]
+name = "resonance-daemon"
+description = "PipeWire filter node daemon with Unix socket IPC server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "resonanced"
+path = "src/main.rs"
+
+[dependencies]
+resonance-dsp = { path = "../resonance-dsp" }
+resonance-preset = { path = "../resonance-preset" }
+resonance-ipc = { path = "../resonance-ipc" }
+resonance-apo = { path = "../resonance-apo" }
+rtrb = { workspace = true }
+rustfft = { workspace = true }
+hound = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
+postcard = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+libc = { workspace = true }
+
+# ── Linux backend (PipeWire) ──────────────────────────────────────────────────
+[target.'cfg(target_os = "linux")'.dependencies]
+pipewire = { workspace = true }
+pipewire-sys = "0.10"
+spa = { workspace = true }
+spa-sys = { workspace = true }
+
+# ── macOS backend (CoreAudio via cpal + native Process Tap) ───────────────────
+[target.'cfg(target_os = "macos")'.dependencies]
+cpal = { workspace = true }
+objc2 = { workspace = true }
+objc2-foundation = { workspace = true }
+objc2-core-audio = { workspace = true }
+objc2-core-foundation = { workspace = true }
+objc2-core-audio-types = { workspace = true }
+
+# ── Windows backend (WASAPI via cpal loopback) ───────────────────────────────
+[target.'cfg(target_os = "windows")'.dependencies]
+cpal = { workspace = true }
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+] }
+# Higher-level COM bindings for WASAPI device identity (friendly names / IDs),
+# which cpal does not expose. Used only to disambiguate same-named endpoints.
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Media_Audio",
+    "Win32_Media_Audio_Endpoints",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Threading",
+    "Win32_Devices_FunctionDiscovery",
+    "Win32_UI_Shell_PropertiesSystem",
+] }
+# Needed in scope for the `#[windows::core::interface]` macro, which expands to
+# `::windows_core::` paths (used to declare the undocumented IPolicyConfig).
+windows-core = "0.62"
+
+# ── RPM packaging (cargo-generate-rpm) ───────────────────────────────────────
+# Build with `cargo build --release --all` first, then from the repo root:
+#   cargo generate-rpm -p crates/resonance-daemon
+# Asset source paths are resolved relative to the repo root.
+[package.metadata.generate-rpm]
+name = "resonance"
+summary = "Terminal/desktop EQ daemon for PipeWire with FxSound and EqualizerAPO presets"
+assets = [
+    { source = "target/release/resonanced", dest = "/usr/bin/resonanced", mode = "755" },
+    { source = "target/release/resonance", dest = "/usr/bin/resonance", mode = "755" },
+    { source = "target/release/resonance-tui", dest = "/usr/bin/resonance-tui", mode = "755" },
+    { source = "target/release/resonance-gui", dest = "/usr/bin/resonance-gui", mode = "755" },
+    { source = "target/release/resonance-tray", dest = "/usr/bin/resonance-tray", mode = "755" },
+    { source = "contrib/io.github.ealtun21.Resonance.desktop", dest = "/usr/share/applications/io.github.ealtun21.Resonance.desktop", mode = "644" },
+    { source = "contrib/io.github.ealtun21.Resonance.svg", dest = "/usr/share/icons/hicolor/scalable/apps/io.github.ealtun21.Resonance.svg", mode = "644" },
+    { source = "contrib/io.github.ealtun21.Resonance.metainfo.xml", dest = "/usr/share/metainfo/io.github.ealtun21.Resonance.metainfo.xml", mode = "644" },
+    { source = "contrib/systemd/resonanced.service", dest = "/usr/lib/systemd/user/resonanced.service", mode = "644" },
+    { source = "LICENSE", dest = "/usr/share/licenses/resonance/LICENSE", mode = "644" },
+    { source = "README.md", dest = "/usr/share/doc/resonance/README.md", mode = "644" },
+]
+
+[package.metadata.generate-rpm.requires]
+pipewire = "*"
+
+[lints]
+workspace = true

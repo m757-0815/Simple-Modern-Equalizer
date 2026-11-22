@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  check:
+    name: Check & Test (Linux)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libpipewire-0.3-dev \
+            libspa-0.2-dev \
+            libdbus-1-dev \
+            libasound2-dev \
+            pkg-config \
+            musl-tools
+
+      - name: Install Rust toolchain (version pinned in rust-toolchain.toml)
+        run: rustup toolchain install
+
+      - name: Add musl target
+        run: rustup target add x86_64-unknown-linux-musl
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Build
+        run: cargo build --all
+
+      - name: Test
+        run: cargo test --all
+
+      - name: Build musl (pure-Rust crates)
+        run: |
+          cargo build --release --target x86_64-unknown-linux-musl \
+            -p resonance-dsp \
+            -p resonance-preset \
+            -p resonance-ipc \
+            -p resonance-cli \
+            -p resonance-tui
+
+  macos:
+    name: Check & Test (macOS)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (version pinned in rust-toolchain.toml)
+        run: rustup toolchain install
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        # CoreAudio backend pulls cpal — no system deps required on macOS;
+        # the linker finds CoreAudio.framework / AudioToolbox automatically.
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Build
+        run: cargo build --all
+
+      - name: Test
+        # CoreAudio init requires no microphone permission for unit tests
+        # (they don't open streams), so this works on GitHub-hosted runners.
+        run: cargo test --all
+
+  packaging:
+    name: Validate desktop/AppStream metadata
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install validators
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            desktop-file-utils appstream
+      - name: Validate .desktop
+        run: desktop-file-validate contrib/io.github.ealtun21.Resonance.desktop
+      - name: Validate AppStream metainfo
+        run: appstreamcli validate --no-net contrib/io.github.ealtun21.Resonance.metainfo.xml
