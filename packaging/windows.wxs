@@ -1,0 +1,81 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="Simple Modern Equalizer" Manufacturer="Simple Modern Equalizer" Version="$(var.ProductVersion)"
+           UpgradeCode="{91D7BBBF-7046-44C3-8D01-2F8B1153D68E}" Scope="perMachine">
+    <MediaTemplate EmbedCab="yes" />
+    <MajorUpgrade Schedule="afterInstallInitialize" DowngradeErrorMessage="A newer version is already installed." />
+    <Icon Id="AppIcon.ico" SourceFile="ui\icons\app-icon.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
+    <Property Id="EXISTINGAUDIOENGINE">
+      <RegistrySearch Id="ExistingApoClass" Root="HKLM" Bitness="always64"
+                      Key="SOFTWARE\Classes\CLSID\{7C3D2A1E-9B6F-4E2A-8D5C-1F0A3B4C5D6E}\InprocServer32"
+                      Type="raw" />
+    </Property>
+    <Launch Condition="Installed OR WIX_UPGRADE_DETECTED OR NOT EXISTINGAUDIOENGINE"
+            Message="Uninstall the existing Resonance audio engine before installing Simple Modern Equalizer." />
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="SimpleDarkEQ">
+        <Component Id="App" Guid="*">
+          <File Id="MainExe" Source="$(var.StageDir)\simple-modern-equalizer.exe" KeyPath="yes" />
+        </Component>
+        <Component Id="Engine" Guid="*">
+          <File Source="$(var.StageDir)\resonanced.exe" KeyPath="yes" />
+        </Component>
+        <Component Id="Apo" Guid="*">
+          <File Id="ApoDll" Source="$(var.StageDir)\resonance_apo.dll" KeyPath="yes" />
+        </Component>
+        <Component Id="InstallScript" Guid="*">
+          <File Id="InstallApo" Source="$(var.StageDir)\install-apo.ps1" KeyPath="yes" />
+        </Component>
+        <Component Id="UninstallScript" Guid="*">
+          <File Id="UninstallApo" Source="$(var.StageDir)\uninstall-apo.ps1" KeyPath="yes" />
+        </Component>
+        <Component Id="LicenseFile" Guid="*">
+          <File Source="$(var.StageDir)\LICENSE" KeyPath="yes" />
+        </Component>
+        <Component Id="Notices" Guid="*">
+          <File Source="$(var.StageDir)\THIRD_PARTY_NOTICES.md" KeyPath="yes" />
+        </Component>
+        <Component Id="GraphFontLicense" Guid="*">
+          <File Source="$(var.StageDir)\IBM-Plex-Mono-OFL.txt" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="AppShortcut" Guid="*">
+        <Shortcut Id="LaunchEqualizer" Name="Simple Modern Equalizer" Target="[#MainExe]"
+                  Icon="AppIcon.ico" WorkingDirectory="INSTALLFOLDER" />
+        <RegistryValue Root="HKLM" Key="SOFTWARE\SimpleDarkEQ" Name="StartMenuShortcut"
+                       Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+    <Feature Id="Core" Title="Simple Modern Equalizer" Level="1">
+      <ComponentRef Id="App" />
+      <ComponentRef Id="Engine" />
+      <ComponentRef Id="Apo" />
+      <ComponentRef Id="InstallScript" />
+      <ComponentRef Id="UninstallScript" />
+      <ComponentRef Id="LicenseFile" />
+      <ComponentRef Id="Notices" />
+      <ComponentRef Id="GraphFontLicense" />
+      <ComponentRef Id="AppShortcut" />
+    </Feature>
+
+    <SetProperty Id="RegisterApo" Before="RegisterApo" Sequence="execute"
+      Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[#InstallApo]&quot; -DllPath &quot;[#ApoDll]&quot;" />
+    <SetProperty Id="RollbackApo" Before="RollbackApo" Sequence="execute"
+      Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[#UninstallApo]&quot;" />
+    <SetProperty Id="RemoveApo" Before="RemoveApo" Sequence="execute"
+      Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[#UninstallApo]&quot;" />
+    <CustomAction Id="RegisterApo" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)" DllEntry="WixQuietExec"
+                  Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="RollbackApo" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)" DllEntry="WixQuietExec"
+                  Execute="rollback" Impersonate="no" Return="ignore" />
+    <CustomAction Id="RemoveApo" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)" DllEntry="WixQuietExec"
+                  Execute="deferred" Impersonate="no" Return="check" />
+    <InstallExecuteSequence>
+      <Custom Action="RollbackApo" After="InstallFiles" Condition="NOT Installed" />
+      <Custom Action="RegisterApo" After="RollbackApo" Condition="NOT Installed" />
+      <Custom Action="RemoveApo" Before="RemoveFiles" Condition='REMOVE~="ALL"' />
+    </InstallExecuteSequence>
+  </Package>
+</Wix>

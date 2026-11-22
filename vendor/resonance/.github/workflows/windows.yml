@@ -1,0 +1,89 @@
+name: windows-installer
+
+# Tags and manual runs only: the local Windows VM (e2e.yml) builds, lints and
+# tests Windows on every change.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      # Static CRT: the APO DLL must have no dynamic CRT dependency (audiodg.exe
+      # can't load ucrt/vcruntime from its locked-down search path); the exes
+      # then also run without the VC++ redistributable.
+      RUSTFLAGS: "-C target-feature=+crt-static"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (version pinned in rust-toolchain.toml)
+        run: rustup toolchain install
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      # Clippy + tests on Windows: ci.yml only lints/tests on Linux + macOS, so
+      # Windows-cfg code (the APO engine, win_devices) would otherwise never be
+      # linted or run in CI. This catches a cross-platform change breaking the
+      # Windows backend before it merges.
+      - name: Clippy (Windows targets)
+        run: cargo clippy --workspace --exclude xtask --all-targets --target x86_64-pc-windows-msvc -- -D warnings
+
+      - name: Test (Windows targets)
+        # The APO tests share a single state file (apo_state.bin), so serialise
+        # the per-binary test run.
+        run: cargo test --workspace --exclude xtask --target x86_64-pc-windows-msvc -- --test-threads=1
+
+      - name: Build release binaries
+        run: cargo build --release --target x86_64-pc-windows-msvc -p resonance-daemon -p resonance-cli -p resonance-tui -p resonance-gui -p resonance-tray
+
+      - name: Build APO DLL (Rust engine staticlib + C++ COM shell)
+        shell: pwsh
+        run: pwsh -NoProfile -ExecutionPolicy Bypass -File contrib\windows\build-apo.ps1
+
+      - name: Stage binaries for the installer
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force target\release | Out-Null
+          Copy-Item target\x86_64-pc-windows-msvc\release\resonanced.exe     target\release\
+          Copy-Item target\x86_64-pc-windows-msvc\release\resonance.exe       target\release\
+          Copy-Item target\x86_64-pc-windows-msvc\release\resonance-tui.exe   target\release\
+          Copy-Item target\x86_64-pc-windows-msvc\release\resonance-gui.exe   target\release\
+          Copy-Item target\x86_64-pc-windows-msvc\release\resonance-tray.exe  target\release\
+          Copy-Item target\apo\resonance_apo.dll                              target\release\
+
+      - name: Generate icon (.ico)
+        shell: pwsh
+        run: |
+          choco install imagemagick -y --no-progress
+          # Use our own icon rasteriser (no SVG delegate needed) to emit PNGs.
+          target\release\resonance-gui.exe --dump-iconset iconset
+          magick iconset\icon_256x256.png -define icon:auto-resize=256,128,64,48,32,16 contrib\windows\resonance.ico
+
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          # Single source of truth: the workspace version from cargo metadata.
+          $meta = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
+          $ver = ($meta.packages | Where-Object { $_.name -eq 'resonance-daemon' }).version
+          if (-not $ver) { throw "could not read version from cargo metadata" }
+          Write-Host "installer version $ver (from Cargo.toml)"
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$ver" contrib\windows\resonance.iss
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: resonance-setup
+          path: contrib/windows/Output/resonance-setup.exe
+
+      - name: Attach installer to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: contrib/windows/Output/resonance-setup.exe

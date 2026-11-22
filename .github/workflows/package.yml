@@ -1,0 +1,83 @@
+name: Build installers
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Rust toolchain and WiX
+        shell: pwsh
+        run: |
+          rustup show
+          dotnet tool install --global wix --version 4.0.6
+          wix extension add -g WixToolset.Util.wixext/4.0.6
+      - name: Build Windows installer
+        shell: pwsh
+        run: ./scripts/build-windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Simple-Modern-Equalizer-Windows-x64
+          path: |
+            dist/SimpleModernEqualizer-Setup-x64.msi
+            dist/windows/simple-modern-equalizer.exe
+          if-no-files-found: error
+
+  appimage:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          rustup show
+          sudo apt-get update
+          sudo apt-get install -y libpipewire-0.3-dev libspa-0.2-dev libclang-dev libudev-dev libxkbcommon-dev libfontconfig1-dev libgl1-mesa-dev squashfs-tools
+      - name: Build AppImage
+        run: sh scripts/build-appimage.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Simple-Modern-Equalizer-AppImage-x86_64
+          path: dist/*.AppImage
+          if-no-files-found: error
+
+  fedora:
+    runs-on: ubuntu-24.04
+    container: fedora:44
+    steps:
+      - name: Install build dependencies
+        run: |
+          dnf install -y git gcc gcc-c++ pkgconf-pkg-config pipewire-devel clang-devel systemd-devel libxkbcommon-devel fontconfig-devel mesa-libGL-devel rpm-build desktop-file-utils python3 curl
+          curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - uses: actions/checkout@v4
+      - name: Build and check Fedora RPM
+        run: |
+          rustup show
+          sh scripts/build-fedora.sh
+          rpm -qpl dist/*.rpm
+          dnf install -y dist/*.rpm
+          test -x /usr/bin/simple-modern-equalizer
+          test -x /usr/libexec/simple-modern-equalizer/resonanced
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Simple-Modern-Equalizer-Fedora-x86_64
+          path: dist/*.rpm
+          if-no-files-found: error
+
+  source:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: git archive --prefix=Simple-Modern-Equalizer/ -o Simple-Modern-Equalizer-source.tar.gz HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Simple-Modern-Equalizer-Source
+          path: Simple-Modern-Equalizer-source.tar.gz
+          if-no-files-found: error

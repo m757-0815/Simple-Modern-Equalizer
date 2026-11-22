@@ -1,0 +1,702 @@
+[
+  {
+    "schema_version": 1,
+    "name": "Beyerdynamic DT 770 PRO - 32 ohms",
+    "description": "Gentle example tuning for DT 770 PRO, 32 ohms. Shared family starting point; not an impedance-specific measured correction.",
+    "preamp_db": -5,
+    "balance": 0,
+    "bypass": false,
+    "show_spectrum": true,
+    "bands": [
+      {
+        "enabled": true,
+        "frequency_hz": 80,
+        "kind": "LS",
+        "gain_db": 0,
+        "q": 0.707
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 180,
+        "kind": "PK",
+        "gain_db": -1.5,
+        "q": 0.8
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 2500,
+        "kind": "PK",
+        "gain_db": 1.5,
+        "q": 1
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 6000,
+        "kind": "PK",
+        "gain_db": -3,
+        "q": 2
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 9000,
+        "kind": "PK",
+        "gain_db": -4.5,
+        "q": 2
+      }
+    ]
+  },
+  {
+    "schema_version": 1,
+    "name": "Beyerdynamic DT 770 PRO - 80 ohms",
+    "description": "Gentle example tuning for DT 770 PRO, 80 ohms. Shared family starting point; not an impedance-specific measured correction.",
+    "preamp_db": -5,
+    "balance": 0,
+    "bypass": false,
+    "show_spectrum": true,
+    "bands": [
+      {
+        "enabled": true,
+        "frequency_hz": 80,
+        "kind": "LS",
+        "gain_db": 0,
+        "q": 0.707
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 180,
+        "kind": "PK",
+        "gain_db": -1.5,
+        "q": 0.8
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 2500,
+        "kind": "PK",
+        "gain_db": 1.5,
+        "q": 1
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 6000,
+        "kind": "PK",
+        "gain_db": -3,
+        "q": 2
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 9000,
+        "kind": "PK",
+        "gain_db": -4.5,
+        "q": 2
+      }
+    ]
+  },
+  {
+    "schema_version": 1,
+    "name": "Beyerdynamic DT 770 PRO - 250 ohms",
+    "description": "Gentle example tuning for DT 770 PRO, 250 ohms. Shared family starting point; not an impedance-specific measured correction.",
+    "preamp_db": -5,
+    "balance": 0,
+    "bypass": false,
+    "show_spectrum": true,
+    "bands": [
+      {
+        "enabled": true,
+        "frequency_hz": 80,
+        "kind": "LS",
+        "gain_db": 0,
+        "q": 0.707
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 180,
+        "kind": "PK",
+        "gain_db": -1.5,
+        "q": 0.8
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 2500,
+        "kind": "PK",
+        "gain_db": 1.5,
+        "q": 1
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 6000,
+        "kind": "PK",
+        "gain_db": -3,
+        "q": 2
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 9000,
+        "kind": "PK",
+        "gain_db": -4.5,
+        "q": 2
+      }
+    ]
+  },
+  {
+    "schema_version": 1,
+    "name": "Beyerdynamic DT 770 PRO Black Edition - 80 ohms",
+    "description": "Gentle example tuning for DT 770 PRO Black Edition, 80 ohms. Shared family starting point; not an impedance-specific measured correction.",
+    "preamp_db": -5,
+    "balance": 0,
+    "bypass": false,
+    "show_spectrum": true,
+    "bands": [
+      {
+        "enabled": true,
+        "frequency_hz": 80,
+        "kind": "LS",
+        "gain_db": 0,
+        "q": 0.707
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 180,
+        "kind": "PK",
+        "gain_db": -1.5,
+        "q": 0.8
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 2500,
+        "kind": "PK",
+        "gain_db": 1.5,
+        "q": 1
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 6000,
+        "kind": "PK",
+        "gain_db": -3,
+        "q": 2
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 9000,
+        "kind": "PK",
+        "gain_db": -4.5,
+        "q": 2
+      }
+    ]
+  },
+  {
+    "schema_version": 1,
+    "name": "Beyerdynamic DT 770 PRO Black Edition - 250 ohms",
+    "description": "Gentle example tuning for DT 770 PRO Black Edition, 250 ohms. Shared family starting point; not an impedance-specific measured correction.",
+    "preamp_db": -5,
+    "balance": 0,
+    "bypass": false,
+    "show_spectrum": true,
+    "bands": [
+      {
+        "enabled": true,
+        "frequency_hz": 80,
+        "kind": "LS",
+        "gain_db": 0,
+        "q": 0.707
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 180,
+        "kind": "PK",
+        "gain_db": -1.5,
+        "q": 0.8
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 2500,
+        "kind": "PK",
+        "gain_db": 1.5,
+        "q": 1
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 6000,
+        "kind": "PK",
+        "gain_db": -3,
+        "q": 2
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 9000,
+        "kind": "PK",
+        "gain_db": -4.5,
+        "q": 2
+      }
+    ]
+  },
+  {
+    "schema_version": 1,
+    "name": "Beyerdynamic DT 770 M - 80 ohms",
+    "description": "Flat example template for the specialized DT 770 M (80 ohms). No measured correction is claimed.",
+    "preamp_db": 0,
+    "balance": 0,
+    "bypass": false,
+    "show_spectrum": true,
+    "bands": []
+  },
+  {
+    "schema_version": 1,
+    "name": "Beyerdynamic DT 770 PRO X - 48 ohms",
+    "description": "Gentle example tuning for DT 770 PRO X, 48 ohms. Shared family starting point; not an impedance-specific measured correction.",
+    "preamp_db": -5,
+    "balance": 0,
+    "bypass": false,
+    "show_spectrum": true,
+    "bands": [
+      {
+        "enabled": true,
+        "frequency_hz": 80,
+        "kind": "LS",
+        "gain_db": 0,
+        "q": 0.707
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 180,
+        "kind": "PK",
+        "gain_db": -1.5,
+        "q": 0.8
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 2500,
+        "kind": "PK",
+        "gain_db": 1.5,
+        "q": 1
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 6000,
+        "kind": "PK",
+        "gain_db": -3,
+        "q": 2
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 9000,
+        "kind": "PK",
+        "gain_db": -4.5,
+        "q": 2
+      }
+    ]
+  },
+  {
+    "schema_version": 1,
+    "name": "Beyerdynamic DT 770 PRO X Limited Edition - 48 ohms",
+    "description": "Gentle example tuning for DT 770 PRO X Limited Edition, 48 ohms. Shared family starting point; not an impedance-specific measured correction.",
+    "preamp_db": -5,
+    "balance": 0,
+    "bypass": false,
+    "show_spectrum": true,
+    "bands": [
+      {
+        "enabled": true,
+        "frequency_hz": 80,
+        "kind": "LS",
+        "gain_db": 0,
+        "q": 0.707
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 180,
+        "kind": "PK",
+        "gain_db": -1.5,
+        "q": 0.8
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 2500,
+        "kind": "PK",
+        "gain_db": 1.5,
+        "q": 1
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 6000,
+        "kind": "PK",
+        "gain_db": -3,
+        "q": 2
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 9000,
+        "kind": "PK",
+        "gain_db": -4.5,
+        "q": 2
+      }
+    ]
+  },
+  {
+    "schema_version": 1,
+    "name": "Beyerdynamic DT 990 PRO - 80 ohms",
+    "description": "Gentle example tuning for DT 990 PRO, 80 ohms. Shared family starting point; not an impedance-specific measured correction.",
+    "preamp_db": -5,
+    "balance": 0,
+    "bypass": false,
+    "show_spectrum": true,
+    "bands": [
+      {
+        "enabled": true,
+        "frequency_hz": 80,
+        "kind": "LS",
+        "gain_db": 2,
+        "q": 0.707
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 180,
+        "kind": "PK",
+        "gain_db": -1.5,
+        "q": 0.8
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 2500,
+        "kind": "PK",
+        "gain_db": 1.5,
+        "q": 1
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 6000,
+        "kind": "PK",
+        "gain_db": -3,
+        "q": 2
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 9000,
+        "kind": "PK",
+        "gain_db": -4.5,
+        "q": 2
+      }
+    ]
+  },
+  {
+    "schema_version": 1,
+    "name": "Beyerdynamic DT 990 PRO - 250 ohms",
+    "description": "Gentle example tuning for DT 990 PRO, 250 ohms. Shared family starting point; not an impedance-specific measured correction.",
+    "preamp_db": -5,
+    "balance": 0,
+    "bypass": false,
+    "show_spectrum": true,
+    "bands": [
+      {
+        "enabled": true,
+        "frequency_hz": 80,
+        "kind": "LS",
+        "gain_db": 2,
+        "q": 0.707
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 180,
+        "kind": "PK",
+        "gain_db": -1.5,
+        "q": 0.8
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 2500,
+        "kind": "PK",
+        "gain_db": 1.5,
+        "q": 1
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 6000,
+        "kind": "PK",
+        "gain_db": -3,
+        "q": 2
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 9000,
+        "kind": "PK",
+        "gain_db": -4.5,
+        "q": 2
+      }
+    ]
+  },
+  {
+    "schema_version": 1,
+    "name": "Beyerdynamic DT 990 PRO Black Edition - 80 ohms",
+    "description": "Gentle example tuning for DT 990 PRO Black Edition, 80 ohms. Shared family starting point; not an impedance-specific measured correction.",
+    "preamp_db": -5,
+    "balance": 0,
+    "bypass": false,
+    "show_spectrum": true,
+    "bands": [
+      {
+        "enabled": true,
+        "frequency_hz": 80,
+        "kind": "LS",
+        "gain_db": 2,
+        "q": 0.707
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 180,
+        "kind": "PK",
+        "gain_db": -1.5,
+        "q": 0.8
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 2500,
+        "kind": "PK",
+        "gain_db": 1.5,
+        "q": 1
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 6000,
+        "kind": "PK",
+        "gain_db": -3,
+        "q": 2
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 9000,
+        "kind": "PK",
+        "gain_db": -4.5,
+        "q": 2
+      }
+    ]
+  },
+  {
+    "schema_version": 1,
+    "name": "Beyerdynamic DT 990 PRO Black Edition - 250 ohms",
+    "description": "Gentle example tuning for DT 990 PRO Black Edition, 250 ohms. Shared family starting point; not an impedance-specific measured correction.",
+    "preamp_db": -5,
+    "balance": 0,
+    "bypass": false,
+    "show_spectrum": true,
+    "bands": [
+      {
+        "enabled": true,
+        "frequency_hz": 80,
+        "kind": "LS",
+        "gain_db": 2,
+        "q": 0.707
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 180,
+        "kind": "PK",
+        "gain_db": -1.5,
+        "q": 0.8
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 2500,
+        "kind": "PK",
+        "gain_db": 1.5,
+        "q": 1
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 6000,
+        "kind": "PK",
+        "gain_db": -3,
+        "q": 2
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 9000,
+        "kind": "PK",
+        "gain_db": -4.5,
+        "q": 2
+      }
+    ]
+  },
+  {
+    "schema_version": 1,
+    "name": "Beyerdynamic DT 990 Edition - 32 ohms",
+    "description": "Gentle example tuning for DT 990 Edition, 32 ohms. Shared family starting point; not an impedance-specific measured correction.",
+    "preamp_db": -5,
+    "balance": 0,
+    "bypass": false,
+    "show_spectrum": true,
+    "bands": [
+      {
+        "enabled": true,
+        "frequency_hz": 80,
+        "kind": "LS",
+        "gain_db": 2,
+        "q": 0.707
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 180,
+        "kind": "PK",
+        "gain_db": -1.5,
+        "q": 0.8
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 2500,
+        "kind": "PK",
+        "gain_db": 1.5,
+        "q": 1
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 6000,
+        "kind": "PK",
+        "gain_db": -3,
+        "q": 2
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 9000,
+        "kind": "PK",
+        "gain_db": -4.5,
+        "q": 2
+      }
+    ]
+  },
+  {
+    "schema_version": 1,
+    "name": "Beyerdynamic DT 990 Edition - 250 ohms",
+    "description": "Gentle example tuning for DT 990 Edition, 250 ohms. Shared family starting point; not an impedance-specific measured correction.",
+    "preamp_db": -5,
+    "balance": 0,
+    "bypass": false,
+    "show_spectrum": true,
+    "bands": [
+      {
+        "enabled": true,
+        "frequency_hz": 80,
+        "kind": "LS",
+        "gain_db": 2,
+        "q": 0.707
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 180,
+        "kind": "PK",
+        "gain_db": -1.5,
+        "q": 0.8
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 2500,
+        "kind": "PK",
+        "gain_db": 1.5,
+        "q": 1
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 6000,
+        "kind": "PK",
+        "gain_db": -3,
+        "q": 2
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 9000,
+        "kind": "PK",
+        "gain_db": -4.5,
+        "q": 2
+      }
+    ]
+  },
+  {
+    "schema_version": 1,
+    "name": "Beyerdynamic DT 990 Edition - 600 ohms",
+    "description": "Gentle example tuning for DT 990 Edition, 600 ohms. Shared family starting point; not an impedance-specific measured correction.",
+    "preamp_db": -5,
+    "balance": 0,
+    "bypass": false,
+    "show_spectrum": true,
+    "bands": [
+      {
+        "enabled": true,
+        "frequency_hz": 80,
+        "kind": "LS",
+        "gain_db": 2,
+        "q": 0.707
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 180,
+        "kind": "PK",
+        "gain_db": -1.5,
+        "q": 0.8
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 2500,
+        "kind": "PK",
+        "gain_db": 1.5,
+        "q": 1
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 6000,
+        "kind": "PK",
+        "gain_db": -3,
+        "q": 2
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 9000,
+        "kind": "PK",
+        "gain_db": -4.5,
+        "q": 2
+      }
+    ]
+  },
+  {
+    "schema_version": 1,
+    "name": "Beyerdynamic DT 990 PRO X - 48 ohms",
+    "description": "Gentle example tuning for DT 990 PRO X, 48 ohms. Shared family starting point; not an impedance-specific measured correction.",
+    "preamp_db": -5,
+    "balance": 0,
+    "bypass": false,
+    "show_spectrum": true,
+    "bands": [
+      {
+        "enabled": true,
+        "frequency_hz": 80,
+        "kind": "LS",
+        "gain_db": 2,
+        "q": 0.707
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 180,
+        "kind": "PK",
+        "gain_db": -1.5,
+        "q": 0.8
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 2500,
+        "kind": "PK",
+        "gain_db": 1.5,
+        "q": 1
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 6000,
+        "kind": "PK",
+        "gain_db": -3,
+        "q": 2
+      },
+      {
+        "enabled": true,
+        "frequency_hz": 9000,
+        "kind": "PK",
+        "gain_db": -4.5,
+        "q": 2
+      }
+    ]
+  }
+]
