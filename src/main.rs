@@ -464,21 +464,29 @@ fn commit(ui: &MainWindow, app: &mut App, candidate: Config) {
     commit_edit(ui, app, candidate, None);
 }
 
-fn commit_edit(ui: &MainWindow, app: &mut App, mut candidate: Config, group: Option<EditGroup>) {
+fn commit_edit(ui: &MainWindow, app: &mut App, mut candidate: Config, group: Option<EditGroup>) -> bool {
     if candidate.spline == app.cfg.spline && candidate.bands != app.cfg.bands {
         candidate.fit_target = None;
     }
     match candidate.validate() {
         Ok(()) => {
             if app.cfg != candidate {
+                if app.cfg.spline != candidate.spline {
+                    ui.invoke_clear_point_selection();
+                }
                 app.remember_current(group);
                 app.cfg = candidate;
                 app.edited = true;
                 apply_and_update_controls(ui, app);
             }
             ui.set_notice("".into());
+            true
         }
-        Err(e) => { ui.set_notice(e.into()); update_controls(ui, app); }
+        Err(e) => {
+            ui.set_notice(e.into());
+            update_controls(ui, app);
+            false
+        }
     }
 }
 
@@ -522,8 +530,38 @@ fn edit_band(ui: &MainWindow, app: &mut App, index: i32, group: Option<EditGroup
     }
     ui.invoke_cancel_graph_drag();
     let mut config = app.cfg.clone();
-    config.replace_band(index, band);
-    commit_edit(ui, app, config, group);
+    let new_index = config.replace_band(index, band);
+    if commit_edit(ui, app, config, group) {
+        ui.set_selected_point(new_index as i32);
+    }
+}
+
+fn fit_initial_window(window: &slint::Window) {
+    use slint::winit_030::{EventResult, WinitWindowAccessor, winit::event::WindowEvent};
+
+    let mut fitted = false;
+    window.on_winit_window_event(move |window, event| {
+        if !fitted && matches!(event, WindowEvent::RedrawRequested) {
+            let fit = window.with_winit_window(|native| {
+                let monitor = native.current_monitor().or_else(|| native.primary_monitor())?;
+                let area = monitor.size();
+                let scale = native.scale_factor();
+                let size = native.inner_size();
+                let width = size.width.min(area.width.saturating_sub((24.0 * scale).round() as u32));
+                let height = size.height.min(area.height.saturating_sub((64.0 * scale).round() as u32));
+                Some((!native.is_maximized() && !window.is_fullscreen() && width > 0 && height > 0
+                    && (width < size.width || height < size.height))
+                    .then(|| slint::PhysicalSize::new(width, height)))
+            }).flatten();
+            if let Some(size) = fit {
+                fitted = true;
+                if let Some(size) = size {
+                    window.set_size(size);
+                }
+            }
+        }
+        EventResult::Propagate
+    });
 }
 
 fn data_directory() -> PathBuf {
@@ -697,6 +735,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     on_ui_action!(on_change_layout, |w, a, simple| {
         if a.simple.active != simple {
             a.remember_current(None);
+            w.invoke_cancel_graph_drag();
         }
         a.simple.active = simple;
         w.set_simple_layout(simple);
@@ -786,7 +825,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     on_ui_action!(on_undo, |w, a, | {
         match a.undo_edit() {
             Ok(true) => {
-                w.invoke_cancel_graph_drag();
+                w.invoke_clear_point_selection();
                 w.set_simple_layout(a.simple.active);
                 w.set_simple_bass(a.simple.bass);
                 w.set_simple_mid(a.simple.mid);
@@ -817,7 +856,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     on_ui_action!(on_change_count, |w, a, count| {
         if a.listening_to_a || a.simple.active { return; }
-        w.invoke_cancel_graph_drag();
+        w.invoke_clear_point_selection();
         a.pending_band_removal = None;
         let count = (count.max(if a.cfg.spline { 2 } else { 0 }) as usize).min(config::MAX_BANDS);
         let protected = a.cfg.protected_band_count(count);
@@ -842,7 +881,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let index = index as usize;
         let Some(band) = a.cfg.bands.get(index) else { return; };
         if a.cfg.locked_point(index) { return; }
-        w.invoke_cancel_graph_drag();
+        w.invoke_clear_point_selection();
         let mut candidate = a.cfg.clone();
         candidate.bands.remove(index);
         if band.needs_removal_confirmation() {
@@ -896,9 +935,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         let (frequency, gain) = graph::band_values(x.into(), y.into());
         let mut config = a.cfg.clone();
+        let index = config.bands.partition_point(|band| band.frequency_hz <= frequency);
         if config.add_peak(frequency, gain) {
             w.invoke_cancel_graph_drag();
             commit(&w, &mut a, config);
+            w.set_selected_point(index as i32);
         } else if config.bands.len() >= config::MAX_BANDS {
             w.set_notice("The equalizer already has 32 bands.".into());
         } else if config.spline {
@@ -949,7 +990,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     on_ui_action!(on_choose_preset, |w, a, index| {
         if a.presets.get(index as usize).is_some() {
-            w.invoke_cancel_graph_drag();
+            w.invoke_clear_point_selection();
             a.remember_current(None);
             a.select_preset(index as usize);
             a.simple.active = false;
@@ -1051,7 +1092,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         apply_and_update_controls(&w, &mut a);
     });
     on_ui_action!(on_listen_a, |w, a, listen| {
-        w.invoke_cancel_graph_drag();
+        w.invoke_clear_point_selection();
         a.listening_to_a = listen && a.reference.is_some();
         apply_and_update_controls(&w, &mut a);
     });
@@ -1075,7 +1116,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             match a.import_apo(&path) {
                 Ok(()) => {
                     a.remember(previous, None);
-                    w.invoke_cancel_graph_drag();
+                    w.invoke_clear_point_selection();
                     w.set_simple_layout(false);
                     w.set_notice("".into());
                     refresh_preset_names(&w, &a);
@@ -1133,7 +1174,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         let mode = w.get_live_mode();
         let visible = !w.window().is_minimized();
-        let show_live_view = visible && w.get_show_live_view();
+        let show_live_view = visible && w.get_live_monitor_expanded();
         let show_eq_graph = visible && !a.simple.active;
         let eq_spectrum = show_eq_graph && w.get_show_eq_spectrum();
         let monitor_clipping = visible && w.get_show_clipping();
@@ -1219,7 +1260,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let update = connection_changed || a.format.as_ref() != Some(&format);
                 if a.active_output != format.output {
                     w.invoke_dismiss_presets();
-                    w.invoke_cancel_graph_drag();
+                    w.invoke_clear_point_selection();
                     a.change_output(format.output.clone());
                     clip_until = Instant::now();
                     w.set_notice("".into());
@@ -1308,6 +1349,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             timer.set_interval(interval);
         }
     });
+    fit_initial_window(ui.window());
     ui.run()?;
     timer.stop();
     let mut a = app.borrow_mut();
