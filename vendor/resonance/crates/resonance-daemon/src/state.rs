@@ -158,6 +158,8 @@ pub struct Inner {
     /// Read by `CaptureOutput` so `resonance verify` can measure the live
     /// output without a soundcard loopback.
     pub capture: std::collections::VecDeque<f32>,
+    #[cfg(target_os = "linux")]
+    pub monitor: crate::monitor::Capture,
     /// Available `PipeWire` Audio/Sink names (updated by `pw_node`).
     pub available_sinks: Vec<String>,
     /// Friendly `node.description` per sink as `(node_name, description)` (updated by `pw_node`).
@@ -213,6 +215,8 @@ impl SharedState {
             needs_resync: false,
             spectrum: [0.0; SPECTRUM_BINS],
             capture: std::collections::VecDeque::with_capacity(CAPTURE_BUF),
+            #[cfg(target_os = "linux")]
+            monitor: Default::default(),
             available_sinks: Vec::new(),
             sink_descriptions: Vec::new(),
             preferred_output: None,

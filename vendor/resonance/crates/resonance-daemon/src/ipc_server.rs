@@ -236,6 +236,10 @@ async fn dispatch_inner(cmd: Command, state: &SharedState) -> Response {
             handle_set_convolution_enabled(state, enabled)
         }
         Command::CaptureOutput { frames } => handle_capture_output(state, frames),
+        #[cfg(target_os = "linux")]
+        Command::CaptureMonitor { frames } => state.0.lock().unwrap().monitor.read(frames),
+        #[cfg(not(target_os = "linux"))]
+        Command::CaptureMonitor { .. } => Response::Error("Pre-EQ capture requires PipeWire".into()),
         Command::ResetAndExportChain { path } => handle_reset_and_export_chain(state, &path),
         // The actual cleanup + exit happens in `handle_client` after this Ok is
         // flushed to the client (see the `is_shutdown` branch there).

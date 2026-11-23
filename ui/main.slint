@@ -1,25 +1,35 @@
 import { Button, CheckBox, ComboBox, LineEdit, ScrollView, Slider, SpinBox, TextEdit } from "std-widgets.slint";
-import "fonts/IBMPlexMono-Regular.ttf";
+import "fonts/Inter-Light.ttf";
 
 global Graphite {
-    out property <color> window: #1C1C1E;
-    out property <color> panel: #2C2C2E;
-    out property <color> plot: #232325;
-    out property <color> border: #424248;
-    out property <color> divider: #4A4A50;
+    out property <color> window: #15181D;
+    out property <color> border: #2D3139;
+    out property <color> divider: #4B5059;
     out property <color> text: #F2F2F4;
     out property <color> secondary: #BCBCC4;
-    out property <color> blue: #58A6FF;
-    out property <color> clip-red: #FF777D;
+}
+
+component PanelHeading inherits Text {
+    accessible-label: self.text;
+    color: Graphite.text;
+    font-size: 18px;
+    vertical-alignment: center;
+}
+
+component Panel inherits Rectangle {
+    background: Graphite.window;
+    border-color: Graphite.border;
+    border-width: 1px;
+    border-radius: 14px;
 }
 
 export global Appearance {
     pure callback parse-color(string, color) -> color;
     pure callback format-color(color) -> string;
-    in-out property <color> graph-accent: #77D9BD;
-    in-out property <color> accent-text: #77D9BD;
-    in-out property <string> graph-hex: "#77D9BD";
-    in-out property <string> text-hex: "#77D9BD";
+    out property <string> default-accent-hex: "#39C98A";
+    in-out property <color> accent: #39C98A;
+    in-out property <string> accent-hex: self.default-accent-hex;
+    in-out property <image> app-icon: @image-url("icons/app-icon.png");
 }
 
 component ColorSwatch inherits Rectangle {
@@ -85,14 +95,14 @@ component ColorField inherits VerticalLayout {
         accessible-label: root.label + " color";
         placeholder-text: "#RRGGBB";
         accepted => { root.accepted(); }
-        Tooltip { text: @markdown("Enter a six-digit hex color, for example `#77D9BD`."); }
+        Tooltip { text: @markdown("Enter a six-digit hex color, for example `#39C98A`."); }
     }
     picker := PopupWindow {
         width: 222px; height: 295px;
         x: 0px; y: 26px;
         close-policy: close-on-click-outside;
         Rectangle {
-            background: Graphite.plot; border-radius: 6px;
+            background: Graphite.window; border-radius: 6px;
             border-width: 1px; border-color: Graphite.border;
             VerticalLayout {
                 padding: 9px; spacing: 5px;
@@ -162,7 +172,7 @@ component ColorField inherits VerticalLayout {
                     accessible-label: "Picker hex"; text <=> root.value;
                     edited => { root.load(Appearance.parse-color(self.text,root.selection)); root.pending-color = root.selection; root.pending-hex = self.text; }
                 }
-                Button { height: 25px; text: "Done"; clicked => { picker.close(); } }
+                Button { height: 25px; text: "Done"; clicked => { picker.close(); root.accepted(); } }
             }
         }
     }
@@ -219,7 +229,6 @@ component Label inherits Text {
 }
 
 component GraphLabel inherits Label {
-    font-family: "IBM Plex Mono";
     font-size: 11px;
     letter-spacing: 0.4px;
 }
@@ -242,19 +251,20 @@ component Choice inherits Rectangle {
         accessible-label: root.accessible-name;
     }
     Rectangle {
-        x: parent.width - 29px;
+        x: parent.width - 31px;
         y: (parent.height - self.height) / 2;
-        width: 25px;
-        height: 20px;
+        width: 26px;
+        height: parent.height - 4px;
         border-radius: 4px;
-        background: Graphite.panel;
+        background: Graphite.window;
         Path {
-            x: 8px; y: 8px;
-            width: 9px; height: 5px;
-            stroke: Graphite.secondary; stroke-width: 1.5px;
-            MoveTo { x: 0; y: 0; }
-            LineTo { x: 4.5; y: 4.5; }
-            LineTo { x: 9; y: 0; }
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 8px; height: 11px;
+            stroke: root.enabled ? Appearance.accent : Graphite.secondary;
+            stroke-width: 1.5px;
+            opacity: root.enabled ? 1 : 0.65;
+            commands: "M 0 3.5 L 4 0 L 8 3.5 M 0 7.5 L 4 11 L 8 7.5";
         }
     }
 }
@@ -288,7 +298,7 @@ component ResizeGrip inherits Rectangle {
     Rectangle {
         width: 42px; height: 3px; border-radius: 2px;
         x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
-        background: grip.has-hover || grip.pressed ? Appearance.graph-accent : Graphite.secondary;
+        background: grip.has-hover || grip.pressed ? Appearance.accent : Graphite.secondary;
     }
     Tooltip { text: @markdown("Drag the bottom edge to resize."); }
     grip := TouchArea {
@@ -315,6 +325,7 @@ component ToneFader inherits Rectangle {
     in property <bool> clip-affected;
     in-out property <float> gain;
     callback edited(float);
+    callback finished();
     height: 190px;
 
     function set-gain(value: float) {
@@ -342,25 +353,25 @@ component ToneFader inherits Rectangle {
                 x: index == 2 ? 36px : 43px;
                 y: 7px;
                 width: index == 2 ? 16px : 9px; height: 1px;
-                background: index == 2 ? Appearance.graph-accent : #696971;
+                background: index == 2 ? Appearance.accent : #696971;
             }
             GraphLabel {
                 x: 88px; y: 0px; width: 40px; height: parent.height;
                 text: level;
-                color: index == 2 ? Appearance.accent-text : Graphite.secondary;
+                color: index == 2 ? Appearance.accent : Graphite.secondary;
             }
         }
         Rectangle {
             x: (parent.width - self.width) / 2;
             y: face.lever-y - self.height / 2;
             width: 38px; height: 20px; border-radius: 4px;
-            background: @linear-gradient(180deg, #777780 0%, #45454B 50%, #35353A 100%);
+            background: Graphite.window;
             border-width: 1px;
-            border-color: input.has-focus ? Graphite.blue : #919198;
+            border-color: input.has-focus || root.clip-affected ? Appearance.accent : #919198;
             Rectangle {
                 x: 7px; y: (parent.height - self.height) / 2;
                 width: parent.width - 14px; height: 2px; border-radius: 1px;
-                background: root.clip-affected ? Graphite.clip-red : Appearance.graph-accent;
+                background: Appearance.accent;
             }
         }
         // Keep the native slider's pointer, keyboard, and accessibility handling.
@@ -375,6 +386,7 @@ component ToneFader inherits Rectangle {
             step: 0.5;
             value <=> root.gain;
             changed(value) => { root.set-gain(value); }
+            released => { root.finished(); }
         }
         TouchArea {
             x: 40px; y: 0px;
@@ -387,6 +399,8 @@ component ToneFader inherits Rectangle {
                     self.start-gain = root.gain;
                     self.grabbed = abs(self.mouse-y - face.lever-y) <= 10px;
                     input.focus();
+                } else if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
+                    root.finished();
                 }
             }
             moved => {
@@ -401,8 +415,9 @@ component ToneFader inherits Rectangle {
                 if (!self.grabbed && abs(self.mouse-y - self.pressed-y) < 2px) {
                     root.set-gain(12 - (self.mouse-y - face.top-travel) * 24 / face.travel);
                 }
+                root.finished();
             }
-            double-clicked => { root.set-gain(0); }
+            double-clicked => { root.set-gain(0); root.finished(); }
         }
     }
 }
@@ -412,8 +427,9 @@ component ToneControl inherits Rectangle {
     in property <bool> clip-affected;
     in-out property <float> gain;
     callback edited(float);
-    background: root.clip-affected ? #36272B : Graphite.panel;
-    border-color: root.clip-affected ? Graphite.clip-red : Graphite.border;
+    callback finished();
+    background: Graphite.window;
+    border-color: root.clip-affected ? Appearance.accent : Graphite.border;
     border-width: 1px;
     border-radius: 12px;
     min-width: 160px;
@@ -426,13 +442,13 @@ component ToneControl inherits Rectangle {
         Label {
             text: root.clip-affected ? root.label + " · CLIP" : root.label;
             accessible-label: self.text;
-            color: root.clip-affected ? Graphite.clip-red : Graphite.secondary;
+            color: root.clip-affected ? Appearance.accent : Graphite.secondary;
             horizontal-alignment: center;
             font-size: 14px;
         }
         GraphLabel {
             text: (root.gain > 0 ? "+" : "") + root.gain + " dB";
-            color: root.clip-affected ? Graphite.clip-red : Appearance.accent-text;
+            color: Appearance.accent;
             font-size: 26px;
             horizontal-alignment: center;
         }
@@ -441,19 +457,75 @@ component ToneControl inherits Rectangle {
             clip-affected: root.clip-affected;
             gain <=> root.gain;
             edited(value) => { root.gain = value; root.edited(value); }
+            finished => { root.finished(); }
         }
+    }
+}
+
+component PreampControls inherits VerticalLayout {
+    in-out property <float> preamp;
+    in-out property <string> preamp-entry;
+    in-out property <bool> auto-headroom;
+    in property <string> preamp-label;
+    in property <bool> locked;
+    callback change-preamp(float);
+    callback enter-preamp(string);
+    callback change-headroom(bool);
+    callback finished();
+    min-width: 340px;
+    spacing: 5px;
+    HorizontalLayout {
+        spacing: 7px;
+        Label { text: "PREAMP"; }
+        CheckBox {
+            text: "Auto Headroom"; width: 132px; checked <=> root.auto-headroom;
+            toggled => { root.change-headroom(self.checked); }
+            Tooltip { text: @markdown("Replace the manual preamp with calculated headroom. Turning this off keeps that gain within the manual range."); }
+        }
+        Rectangle { horizontal-stretch: 1; }
+        Button {
+            text: "−"; width: 27px; accessible-label: "Decrease preamp";
+            enabled: !root.auto-headroom && !root.locked;
+            clicked => { root.change-preamp(root.preamp - 0.05); root.finished(); }
+            Tooltip { text: @markdown("Decrease preamp by 0.05 dB."); }
+        }
+        LineEdit {
+            width: 63px; text <=> root.preamp-entry; accessible-label: "Preamp in dB";
+            enabled: !root.auto-headroom && !root.locked;
+            accepted => { root.enter-preamp(self.text); }
+            Tooltip { text: @markdown("Enter gain in dB and press Enter."); }
+        }
+        Button {
+            text: "+"; width: 27px; accessible-label: "Increase preamp";
+            enabled: !root.auto-headroom && !root.locked;
+            clicked => { root.change-preamp(root.preamp + 0.05); root.finished(); }
+            Tooltip { text: @markdown("Increase preamp by 0.05 dB."); }
+        }
+    }
+    HorizontalLayout {
+        spacing: 8px;
+        Slider {
+            enabled: !root.auto-headroom && !root.locked;
+            minimum: -12; maximum: 12; step: 0.05; value <=> root.preamp;
+            accessible-label: "Preamp";
+            changed(value) => { root.change-preamp(value); }
+            released => { root.finished(); }
+            Tooltip { text: @markdown("Adjust the gain applied before the EQ filters."); }
+        }
+        Label { text: root.preamp-label; color: Appearance.accent; }
     }
 }
 
 export component MainWindow inherits Window {
     title: "Simple Modern Equalizer";
-    icon: @image-url("icons/app-icon.png");
+    icon: Appearance.app-icon;
     preferred-width: 1120px;
     preferred-height: 920px;
     min-width: 860px;
     min-height: 520px;
     background: Graphite.window;
-    default-font-family: "sans-serif";
+    default-font-family: "Inter Light";
+    default-font-weight: 300;
     default-font-size: 14px;
     forward-focus: window-keys;
     in property <string> app-version;
@@ -490,9 +562,18 @@ export component MainWindow inherits Window {
     in-out property <bool> show-preset-button: true;
     in-out property <bool> show-eq-spectrum;
     in-out property <bool> fullscreen-enabled;
+    in property <bool> has-login-start;
+    in-out property <bool> login-start;
+    private property <string> login-start-error;
+    callback change-login-start(bool) -> string;
     callback change-full-screen(bool);
-    callback change-colors(string, string) -> string;
-    callback enable-spline();
+    callback change-colors(string) -> string;
+    callback toggle-eq-mode();
+    in property <bool> fitting-eq;
+    in property <string> fit-detail;
+    in property <bool> can-undo;
+    callback undo();
+    callback finish-edit();
     function set-fullscreen-mode(enabled: bool) {
         root.fullscreen-enabled = enabled;
         root.change-full-screen(enabled);
@@ -503,7 +584,7 @@ export component MainWindow inherits Window {
     in property <string> preamp-label;
     in-out property <string> preamp-entry;
     in property <string> balance-label;
-    in property <string> config-name;
+    in property <bool> graph-edited;
     in property <string> status: "Starting audio engine…";
     in property <string> notice;
     in property <bool> connected: false;
@@ -514,13 +595,10 @@ export component MainWindow inherits Window {
     in property <string> eq-top-db: "+24";
     in property <float> eq-zero-position: 0.5;
     in property <image> live-image;
+    in property <image> monitor-image;
+    in property <string> monitor-status;
     out property <PlotExtent> eq-plot-extent;
-    private property <PlotExtent> full-live-plot-extent;
-    // Fit the renderer's 480 × 120 logical canvas inside Live View.
-    private property <float> vu-aspect: 4;
-    private property <float> vu-width: min(root.full-live-plot-extent.width, root.full-live-plot-extent.height * root.vu-aspect);
-    private property <PlotExtent> vu-plot-extent: { width: root.vu-width, height: root.vu-width / root.vu-aspect };
-    out property <PlotExtent> live-plot-extent: root.live-mode == 0 ? root.vu-plot-extent : root.full-live-plot-extent;
+    out property <PlotExtent> live-plot-extent;
     in property <[FrequencyTick]> live-frequency-ticks;
     in-out property <int> live-mode: 0;
     in property <float> left-level-dbfs: -1000;
@@ -574,11 +652,12 @@ export component MainWindow inherits Window {
     callback move-band(int, float, float) -> int;
     private property <int> drag-generation;
     public function cancel-graph-drag() { root.drag-generation += 1; }
-    callback load-config();
+    callback import-apo();
     callback save-config();
     callback export-apo();
 
     private property <length> eq-resize-scroll-floor;
+    changed simple-layout => { window-scroll.content-y = 0px; }
     window-keys := FocusScope {
         width: parent.width;
         height: parent.height;
@@ -590,6 +669,8 @@ export component MainWindow inherits Window {
             return reject;
         }
     window-scroll := ScrollView {
+        y: root.simple-layout ? top-controls.height + 18px : 0px;
+        height: parent.height - self.y;
         horizontal-scrollbar-policy: always-off;
         content-width: self.visible-width;
         content-height: max(page.height, root.eq-resize-scroll-floor);
@@ -602,121 +683,56 @@ export component MainWindow inherits Window {
         y: 0px;
         width: window-scroll.content-width;
         height: max(window-scroll.visible-height, self.min-height);
-        padding: 26px;
-        spacing: 12px;
-        HorizontalLayout {
-            // Keep navigation compact when the restored window has spare height.
-            height: 32px;
-            spacing: 6px;
-            Button {
-                text: "Simple"; min-width: 86px; primary: root.simple-layout;
-                Tooltip { text: @markdown("Use Bass, Mid, Treble, and Loudness."); }
-                clicked => { root.change-layout(true); }
-            }
-            Button {
-                text: "Standard"; min-width: 86px; primary: !root.simple-layout;
-                Tooltip { text: @markdown("Edit individual EQ bands, preamp, and balance."); }
-                clicked => { root.change-layout(false); }
-            }
-            Rectangle { horizontal-stretch: 1; }
-            settings-button := Button {
-                text: "Settings";
-                Tooltip { text: @markdown("Choose what to display and configure playback."); }
-                clicked => { settings.show(); }
-            }
-        }
-        HorizontalLayout {
-            spacing: 12px;
-            Image {
-                width: 44px; height: 44px; source: root.icon;
-            }
-            Text {
-                text: root.title; color: Graphite.text;
-                font-size: 25px; font-weight: 700; vertical-alignment: center;
-            }
-            Rectangle { horizontal-stretch: 1; }
-            preset-menu-button := Button {
-                visible: root.show-preset-button;
-                text: "Select Preset";
-                Tooltip { text: @markdown("Load and manage EQ presets and output links."); }
-                width: 112px;
-                clicked => {
-                    root.preset-overwrite-message = "";
-                    preset-menu.show();
-                }
-            }
-            Rectangle {
-                width: 180px;
-                height: 44px;
-                border-radius: 8px;
-                border-width: 1px;
-                border-color: Graphite.border;
-                background: Graphite.panel;
-                HorizontalLayout {
-                    padding: 8px;
-                    spacing: 10px;
-                    cross-axis-alignment: center;
-                    Label {
-                        text: "Enable Equalizer";
-                        color: Graphite.text;
-                        horizontal-stretch: 1;
-                    }
-                    Button {
-                        text: root.bypass ? "Off" : "On";
-                        primary: !root.bypass;
-                        width: 46px;
-                        accessible-label: "Enable Equalizer";
-                        accessible-checkable: true;
-                        accessible-checked: !root.bypass;
-                        Tooltip { text: @markdown("Turn equalization and stereo balance on or off."); }
-                        clicked => {
-                            root.bypass = !root.bypass;
-                            root.change-bypass(root.bypass);
-                        }
-                    }
-                }
-            }
-        }
-        if root.show-live-view: live-view := Rectangle {
+        padding: 18px;
+        padding-top: root.simple-layout ? 14px : top-controls.height + 32px;
+        spacing: 14px;
+        if root.show-live-view: live-view := Panel {
             height: root.live-view-height * 1px;
-            background: Graphite.panel;
-            border-radius: 12px;
             VerticalLayout {
                 padding: 10px;
                 spacing: 5px;
                 HorizontalLayout {
                     spacing: 10px;
-                    GraphLabel { text: "LIVE VIEW"; color: Appearance.accent-text; }
-                    if root.live-mode == 1 || root.live-mode == 2: GraphLabel {
+                    cross-axis-alignment: center;
+                    PanelHeading { text: "Live Monitor"; }
+                    if root.live-mode == 0: GraphLabel {
                         text: root.signal;
                     }
                     Rectangle { horizontal-stretch: 1; }
                     GraphLabel {
-                        text: root.live-mode == 0 ? "0 VU = −18 dBFS RMS"
-                            : root.live-mode == 3 ? "MONO OUTPUT · ±1 FULL SCALE"
-                            : root.live-mode == 4 ? "STEREO LEVEL · dBFS RMS" : "RELATIVE LEVEL";
+                        text: root.live-mode == 1 ? "MONO OUTPUT · ±1 FULL SCALE"
+                            : root.live-mode == 2 ? "STEREO LEVEL · dBFS RMS"
+                            : root.live-mode == 3 ? "−66 TO 0 dBFS"
+                            : root.live-mode == 4 ? "OUTPUT RMS · −60 TO 0 dBFS"
+                            : root.live-mode == 5 ? root.monitor-status : "RELATIVE LEVEL";
                         horizontal-alignment: right;
                     }
                     if root.show-clipping: GraphLabel {
                         text: "CLIP";
-                        color: root.clipping ? #ff916d : #9898A0;
+                        color: root.clipping ? Appearance.accent : Graphite.secondary;
                         accessible-label: root.clipping ? "Output peak reached full scale" : "No recent clipping";
                     }
                     Choice {
-                        width: 164px;
+                        width: 182px;
                         accessible-name: "Live display";
-                        model: ["Analog VU", "Spectrum", "Bars", "Oscilloscope", "Stereo Level"];
+                        model: ["Bars", "Oscilloscope", "Stereo Level", "Before / After EQ", "Loudness History", "Stereo Field"];
                         current-index <=> root.live-mode;
-                        Tooltip { text: @markdown("Choose the visualization for Live View."); }
+                        Tooltip { text: @markdown("Choose the visualization for Live Monitor."); }
                     }
                 }
                 live-plot := PlotArea {
                     border-radius: 6px; clip: true; vertical-stretch: 1;
-                    extent-changed(extent) => { root.full-live-plot-extent = extent; }
-                    if root.live-mode != 0 && root.live-mode != 4: Image {
-                        width: parent.width; height: parent.height; source: root.live-image; image-fit: fill;
+                    extent-changed(extent) => { root.live-plot-extent = extent; }
+                    if root.live-mode != 2: Image {
+                        width: parent.width; height: parent.height;
+                        source: root.live-mode >= 3 ? root.monitor-image : root.live-image;
+                        image-fit: fill;
                     }
-                    if root.live-mode == 4: VerticalLayout {
+                    if root.live-mode >= 3 && root.monitor-status != "" && root.live-mode != 5: GraphLabel {
+                        x: 12px; y: 7px;
+                        text: root.monitor-status;
+                    }
+                    if root.live-mode == 2: VerticalLayout {
                         padding-left: 12px;
                         padding-right: 12px;
                         spacing: 5px;
@@ -725,7 +741,7 @@ export component MainWindow inherits Window {
                             height: 14px;
                             spacing: 8px;
                             cross-axis-alignment: center;
-                            GraphLabel { text: index == 0 ? "LEFT" : "RIGHT"; width: 48px; color: Appearance.accent-text; }
+                            GraphLabel { text: index == 0 ? "LEFT" : "RIGHT"; width: 48px; color: Appearance.accent; }
                             track := Rectangle {
                                 horizontal-stretch: 1;
                                 height: 10px;
@@ -738,7 +754,7 @@ export component MainWindow inherits Window {
                                     clip: true;
                                     Rectangle {
                                         x: 0px; y: 0px; width: track.width; height: track.height;
-                                        background: @linear-gradient(90deg, Appearance.graph-accent.darker(0.25) 0%, Appearance.graph-accent 74%, #f0c987 90%, #ff916d 100%);
+                                        background: Appearance.accent;
                                     }
                                 }
                             }
@@ -767,41 +783,8 @@ export component MainWindow inherits Window {
                             Rectangle { width: 54px; }
                         }
                     }
-                    if root.live-mode == 0: vu-plot := Rectangle {
-                        width: min(parent.width, parent.height * root.vu-aspect);
-                        height: self.width / root.vu-aspect;
-                        x: (parent.width - self.width) / 2;
-                        y: (parent.height - self.height) / 2;
-                        Image {
-                            width: parent.width; height: parent.height; source: root.live-image; image-fit: contain;
-                        }
-                        for side[index] in ["LEFT", "RIGHT"]: Rectangle {
-                            width: parent.width / 2; height: parent.height;
-                            x: index * self.width; y: 0px;
-                            private property <float> meter-scale: self.height / 120px;
-                            GraphLabel {
-                                x: 14px * parent.meter-scale; y: 94px * parent.meter-scale;
-                                font-size: max(7px, 11px * parent.meter-scale);
-                                text: side; color: Appearance.accent-text;
-                            }
-                            GraphLabel {
-                                x: 30px * parent.meter-scale - self.width / 2;
-                                y: 53px * parent.meter-scale - self.height / 2;
-                                width: max(22px, 36px * parent.meter-scale);
-                                font-size: max(7px, 11px * parent.meter-scale);
-                                text: "−20"; horizontal-alignment: center;
-                            }
-                            GraphLabel {
-                                x: 210px * parent.meter-scale - self.width / 2;
-                                y: 53px * parent.meter-scale - self.height / 2;
-                                width: max(22px, 36px * parent.meter-scale);
-                                font-size: max(7px, 11px * parent.meter-scale);
-                                text: "+3"; horizontal-alignment: center; color: #e09161;
-                            }
-                        }
-                    }
                 }
-                if root.live-mode == 1 || root.live-mode == 2: Rectangle {
+                if root.live-mode == 0 || root.live-mode == 3: Rectangle {
                     height: 16px;
                     for tick in root.live-frequency-ticks: GraphLabel {
                         width: 48px;
@@ -810,99 +793,129 @@ export component MainWindow inherits Window {
                         horizontal-alignment: tick.position == 0 ? left : tick.position == 1 ? right : center;
                     }
                 }
-                if root.live-mode == 0 || root.live-mode == 3 || root.live-mode == 4: HorizontalLayout {
-                    if root.live-mode == 0 || root.live-mode == 4: live-status := GraphLabel { text: root.signal; }
-                    if root.live-mode == 3: GraphLabel { text: "0 ms"; }
-                    if root.live-mode == 3: GraphLabel { text: root.scope-status; horizontal-alignment: center; }
-                    if root.live-mode == 3: GraphLabel { text: "20 ms"; horizontal-alignment: right; }
+                if root.live-mode == 3: HorizontalLayout {
+                    spacing: 12px;
+                    GraphLabel { text: "━ Before EQ"; color: Appearance.accent.transparentize(0.40); }
+                    GraphLabel { text: "━ After EQ"; color: Appearance.accent; }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+                if root.live-mode == 4: Rectangle {
+                    height: 16px;
+                    for tick[index] in ["30 s ago", "20 s", "10 s", "Now"]: GraphLabel {
+                        width: 54px;
+                        x: clamp(index * parent.width / 3 - self.width / 2, 0px, parent.width - self.width);
+                        text: tick;
+                        horizontal-alignment: index == 0 ? left : index == 3 ? right : center;
+                    }
+                }
+                if root.live-mode == 5: HorizontalLayout {
+                    GraphLabel { text: "HORIZONTAL · SIDE (R−L)"; }
+                    GraphLabel { text: "VERTICAL · MID (L+R)"; horizontal-alignment: right; }
+                }
+                if root.live-mode == 1 || root.live-mode == 2: HorizontalLayout {
+                    if root.live-mode == 2: live-status := GraphLabel { text: root.signal; }
+                    if root.live-mode == 1: GraphLabel { text: "0 ms"; }
+                    if root.live-mode == 1: GraphLabel { text: root.scope-status; horizontal-alignment: center; }
+                    if root.live-mode == 1: GraphLabel { text: "20 ms"; horizontal-alignment: right; }
                 }
                 ResizeGrip {
                     panel-height <=> root.live-view-height; minimum: 146; maximum: 420;
-                    label: "Live View height"; resized => { root.change-graph-height(); }
+                    label: "Live Monitor height"; resized => { root.change-graph-height(); }
                 }
             }
         }
         if root.simple-layout: VerticalLayout {
-            vertical-stretch: 1;
+            vertical-stretch: 0;
             alignment: start;
             spacing: 16px;
-            HorizontalLayout {
-                spacing: 14px;
-                ToneControl {
-                    label: "Bass"; gain <=> root.simple-bass;
-                    clip-affected: root.show-simple-clip && root.simple-clipping.bass;
-                    edited(value) => { root.change-tone(value, root.simple-mid, root.simple-treble, root.simple-loudness); }
-                }
-                ToneControl {
-                    label: "Mid"; gain <=> root.simple-mid;
-                    clip-affected: root.show-simple-clip && root.simple-clipping.mid;
-                    edited(value) => { root.change-tone(root.simple-bass, value, root.simple-treble, root.simple-loudness); }
-                }
-                ToneControl {
-                    label: "Treble"; gain <=> root.simple-treble;
-                    clip-affected: root.show-simple-clip && root.simple-clipping.treble;
-                    edited(value) => { root.change-tone(root.simple-bass, root.simple-mid, value, root.simple-loudness); }
-                }
-            }
-            Rectangle {
-                background: Graphite.panel; border-radius: 12px; height: 66px;
-                HorizontalLayout {
-                    padding: 16px;
-                    spacing: 16px;
-                    CheckBox {
-                        text: "Loudness"; checked <=> root.simple-loudness;
-                        width: 112px;
-                        Tooltip { text: @markdown("Boost bass and treble for quieter listening."); }
-                        toggled => { root.change-tone(root.simple-bass, root.simple-mid, root.simple-treble, self.checked); }
+            Panel {
+                VerticalLayout {
+                    padding: 12px; spacing: 8px;
+                    HorizontalLayout {
+                        spacing: 12px;
+                        cross-axis-alignment: center;
+                        PanelHeading { text: "Tone Controls"; }
+                        CheckBox {
+                            text: "Loudness"; checked <=> root.simple-loudness;
+                            Tooltip { text: @markdown("Boost bass and treble for quieter listening."); }
+                            toggled => { root.change-tone(root.simple-bass, root.simple-mid, root.simple-treble, self.checked); }
+                        }
+                        if root.show-simple-clip && !root.simple-clipping.bass
+                            && !root.simple-clipping.mid && !root.simple-clipping.treble: GraphLabel {
+                            text: "OUTPUT CLIPPING";
+                            accessible-label: self.text;
+                            color: Appearance.accent;
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                        Label {
+                            text: "Double-click a lever to reset it to 0 dB";
+                            horizontal-alignment: right;
+                            overflow: elide;
+                        }
                     }
-                    CheckBox {
-                        text: "Auto Headroom"; checked <=> root.auto-headroom;
-                        width: 144px;
-                        Tooltip { text: @markdown("Reduces gain to make room for tone boosts and lower the chance of clipping."); }
-                        toggled => { root.change-headroom(self.checked); }
-                    }
-                    if root.show-simple-clip && !root.simple-clipping.bass
-                        && !root.simple-clipping.mid && !root.simple-clipping.treble: GraphLabel {
-                        text: "OUTPUT CLIPPING";
-                        accessible-label: self.text;
-                        color: Graphite.clip-red;
-                    }
-                    Label {
-                        text: "Double-click a lever to reset it to 0 dB";
-                        horizontal-stretch: 1;
-                        horizontal-alignment: right;
-                        overflow: elide;
+                    HorizontalLayout {
+                        spacing: 12px;
+                        ToneControl {
+                            label: "Bass"; gain <=> root.simple-bass;
+                            clip-affected: root.show-simple-clip && root.simple-clipping.bass;
+                            edited(value) => { root.change-tone(value, root.simple-mid, root.simple-treble, root.simple-loudness); }
+                            finished => { root.finish-edit(); }
+                        }
+                        ToneControl {
+                            label: "Mid"; gain <=> root.simple-mid;
+                            clip-affected: root.show-simple-clip && root.simple-clipping.mid;
+                            edited(value) => { root.change-tone(root.simple-bass, value, root.simple-treble, root.simple-loudness); }
+                            finished => { root.finish-edit(); }
+                        }
+                        ToneControl {
+                            label: "Treble"; gain <=> root.simple-treble;
+                            clip-affected: root.show-simple-clip && root.simple-clipping.treble;
+                            edited(value) => { root.change-tone(root.simple-bass, root.simple-mid, value, root.simple-loudness); }
+                            finished => { root.finish-edit(); }
+                        }
                     }
                 }
             }
         }
-        if !root.simple-layout: VerticalLayout {
-        spacing: 12px;
-        vertical-stretch: 4;
-        Rectangle {
-            background: Graphite.plot; border-color: Graphite.border; border-width: 1px; border-radius: 12px;
+        if !root.simple-layout: Panel {
+            background: Graphite.window;
             height: (root.eq-plot-height + (root.show-clipping ? 175 : 136)) * 1px;
             VerticalLayout {
                 padding: 14px; padding-bottom: 33px; spacing: 7px;
-                Text {
-                    text: root.config-name;
-                    color: Graphite.text;
-                    height: 21px;
-                    font-size: 18px;
-                    font-weight: 600;
-                    overflow: elide;
+                HorizontalLayout {
+                    height: 28px;
+                    spacing: 10px;
+                    cross-axis-alignment: center;
+                    graph-title := PanelHeading {
+                        text: "Equalizer Graph";
+                        min-width: 0px;
+                        overflow: elide;
+                    }
+                    Button {
+                        text: root.fitting-eq ? "Fitting…" : root.spline-eq ? "Use Parametric" : "Use Spline";
+                        accessible-label: self.text + " From EQ Graph";
+                        enabled: !root.listening-to-a && !root.fitting-eq;
+                        Tooltip { text: @markdown("Switch editors and keep the current EQ curve."); }
+                        clicked => { root.toggle-eq-mode(); }
+                    }
+                    if root.graph-edited: GraphLabel { text: "Edited"; }
+                    if root.fit-detail != "": GraphLabel {
+                        text: root.fit-detail;
+                        Tooltip { text: @markdown("Largest difference from the reference curve on the fitting grid."); }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
                 }
                 HorizontalLayout {
-                    height: 24px;
+                    height: 17px;
                     spacing: 8px;
-                    GraphLabel { text: root.spline-eq ? "SPLINE EQ" : "PARAMETRIC EQ"; color: Appearance.accent-text; }
+                    GraphLabel { text: root.spline-eq ? "Spline EQ" : "Parametric EQ"; color: Appearance.accent; }
                     Rectangle { horizontal-stretch: 1; }
                     if root.show-clipping && root.clipping && root.clip-regions.length > 0: GraphLabel {
-                        text: "STRONG BANDS AT CLIP"; color: #ff916d;
+                        text: "Strong Bands At Clip"; color: Appearance.accent;
                         Tooltip { text: @markdown("Strong output frequencies during the clip. Digital clipping affects the whole waveform."); }
                     }
                     GraphLabel {
-                        text: root.bypass ? "EQ OFF" : "INCLUDING PREAMP";
+                        text: root.bypass ? "EQ Off" : "Including Preamp";
                         Tooltip { text: @markdown("Preamp shifts the whole response up or down in dB."); }
                     }
                 }
@@ -924,20 +937,25 @@ export component MainWindow inherits Window {
                         vertical-stretch: 1;
                         extent-changed(extent) => { root.eq-plot-extent = extent; }
                         Tooltip { text: root.spline-eq
-                            ? @markdown("Double-click to add a point. Drag to change frequency and gain. The first and last points move vertically only.")
-                            : @markdown("Edit the parametric filters below, or choose Use spline in Settings for fixed graph points."); }
+                            ? @markdown("Double-click to add a point. Drag to change frequency and gain. Spline points need room between them. The first and last points move vertically only.")
+                            : @markdown("Drag a band point to change frequency and gain. Double-click to add a peak filter."); }
                         private property <int> dragging: -1;
                         private property <int> pressed-generation: -1;
                         private property <int> active-drag: self.pressed-generation == root.drag-generation ? self.dragging : -1;
 
-                        Image { width: parent.width; height: parent.height; source: root.graph; image-fit: fill; }
+                        Rectangle {
+                            width: parent.width; height: parent.height;
+                            border-width: 1px; border-color: Graphite.border;
+                            border-radius: 6px; clip: true;
+                            Image { width: parent.width; height: parent.height; source: root.graph; image-fit: fill; }
+                        }
                         if root.show-clipping && root.clipping: Rectangle {
                             width: parent.width; height: parent.height; clip: true;
                             for region in root.clip-regions: Rectangle {
                                 x: region.start * parent.width;
                                 width: (region.end - region.start) * parent.width;
                                 height: parent.height;
-                                background: #ff916d32;
+                                background: Appearance.accent.transparentize(0.82);
                             }
                         }
                         for dot[index] in root.graph-dots: Rectangle {
@@ -945,11 +963,11 @@ export component MainWindow inherits Window {
                             x: dot.x * parent.width - self.width / 2;
                             y: clamp(dot.y, 0, 1) * parent.height - self.height / 2;
                             border-width: 1px;
-                            border-color: dot.enabled ? Appearance.graph-accent : #86868E;
-                            background: !dot.enabled ? #414148 : plot.active-drag == index ? Appearance.graph-accent : #343B39;
+                            border-color: dot.enabled ? Appearance.accent : Graphite.divider;
+                            background: dot.enabled && plot.active-drag == index ? Appearance.accent : Graphite.window;
                             GraphLabel {
                                 text: index + 1;
-                                color: !dot.enabled ? Graphite.secondary : plot.active-drag == index ? Graphite.window : #E6FAF3;
+                                color: !dot.enabled ? Graphite.secondary : plot.active-drag == index ? Graphite.window : Graphite.text;
                                 font-size: 10px;
                                 horizontal-alignment: center;
                             }
@@ -970,6 +988,7 @@ export component MainWindow inherits Window {
                                     plot.pressed-generation = root.drag-generation;
                                 } else if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
                                     plot.dragging = -1;
+                                    root.finish-edit();
                                 }
                             }
                             moved => {
@@ -1009,7 +1028,7 @@ export component MainWindow inherits Window {
                             width: parent.width * clamp((root.output-peak-dbfs + 60) / 60, 0, 1);
                             height: parent.height;
                             border-radius: 4px;
-                            background: root.clipping ? #ff916d : root.output-peak-dbfs >= -3 ? #f0c987 : Appearance.graph-accent;
+                            background: Appearance.accent;
                         }
                     }
                     clip-peak := GraphLabel {
@@ -1025,7 +1044,7 @@ export component MainWindow inherits Window {
                         horizontal-alignment: center;
                         text: !root.connected ? "OFFLINE" : root.clipping ? "CLIPPING" : "NO CLIP";
                         accessible-label: self.text;
-                        color: root.clipping && root.connected ? #ff916d : Graphite.secondary;
+                        color: root.clipping && root.connected ? Appearance.accent : Graphite.secondary;
                     }
                 }
             }
@@ -1042,97 +1061,85 @@ export component MainWindow inherits Window {
                 resized => { root.change-graph-height(); }
             }
         }
-        if root.show-levels: Rectangle {
-            background: Graphite.panel; border-radius: 12px; height: 88px;
-            HorizontalLayout {
-                padding: 16px; spacing: 24px;
-                VerticalLayout {
-                    min-width: 340px;
-                    spacing: 5px;
-                    HorizontalLayout {
-                        spacing: 7px;
-                        Label { text: "PREAMP"; }
-                        CheckBox {
-                            text: "Auto Headroom"; checked <=> root.auto-headroom;
-                            toggled => { root.change-headroom(self.checked); }
-                            Tooltip { text: @markdown("Automatically lowers preamp when EQ boosts need more headroom. Turn it off to set the preamp manually."); }
-                        }
-                        Rectangle { horizontal-stretch: 1; }
-                        Button {
-                            text: "−"; width: 27px; accessible-label: "Decrease preamp";
-                            enabled: !root.auto-headroom && !root.listening-to-a;
-                            clicked => { root.change-preamp(root.preamp - 0.05); }
-                            Tooltip { text: @markdown("Decrease preamp by 0.05 dB."); }
-                        }
-                        LineEdit {
-                            width: 63px; text <=> root.preamp-entry; accessible-label: "Preamp in dB";
-                            enabled: !root.auto-headroom && !root.listening-to-a;
-                            accepted => { root.enter-preamp(self.text); }
-                            Tooltip { text: @markdown("Enter gain in dB and press Enter."); }
-                        }
-                        Button {
-                            text: "+"; width: 27px; accessible-label: "Increase preamp";
-                            enabled: !root.auto-headroom && !root.listening-to-a;
-                            clicked => { root.change-preamp(root.preamp + 0.05); }
-                            Tooltip { text: @markdown("Increase preamp by 0.05 dB."); }
-                        }
+        if root.show-levels: Panel {
+            height: 116px;
+            VerticalLayout {
+                padding: 16px; spacing: 8px;
+                PanelHeading { text: "Preamp & Balance"; }
+                HorizontalLayout {
+                    spacing: 24px;
+                    PreampControls {
+                        locked: root.listening-to-a;
+                        preamp <=> root.preamp;
+                        preamp-entry <=> root.preamp-entry;
+                        auto-headroom <=> root.auto-headroom;
+                        preamp-label: root.preamp-label;
+                        change-preamp(value) => { root.change-preamp(value); }
+                        enter-preamp(value) => { root.enter-preamp(value); }
+                        change-headroom(enabled) => { root.change-headroom(enabled); }
+                        finished => { root.finish-edit(); }
                     }
+                    Rectangle { width: 1px; background: Graphite.divider; }
                     HorizontalLayout {
                         spacing: 8px;
+                        cross-axis-alignment: center;
+                        balance-heading := Label { text: "BALANCE"; }
+                        balance-readout := Text { width: 85px; text: root.balance-label; color: Appearance.accent; }
+                        GraphLabel { text: "−"; }
                         Slider {
-                            enabled: !root.auto-headroom && !root.listening-to-a;
-                            minimum: -12; maximum: 12; step: 0.05; value <=> root.preamp;
-                            accessible-label: "Preamp";
-                            changed(value) => { root.change-preamp(value); }
-                            Tooltip { text: @markdown("Adjust the gain applied before the EQ filters."); }
+                            horizontal-stretch: 1;
+                            enabled: !root.listening-to-a;
+                            minimum: -1; maximum: 1; step: 0.05; value <=> root.balance;
+                            Tooltip { text: @markdown("Shift the output toward the left or right channel."); }
+                            accessible-label: "Balance";
+                            changed(value) => { root.change-balance(value); }
+                            released => { root.finish-edit(); }
                         }
-                        Label { text: root.preamp-label; color: Appearance.accent-text; }
+                        GraphLabel { text: "+"; }
+                        Button {
+                            text: "Center"; enabled: !root.listening-to-a;
+                            clicked => { root.change-balance(0); root.finish-edit(); }
+                            Tooltip { text: @markdown("Reset the balance to the center."); }
+                        }
                     }
                 }
-                Rectangle { width: 1px; background: Graphite.divider; }
+            }
+        }
+        if !root.simple-layout && root.show-band-list: Panel {
+            VerticalLayout {
+                padding: 12px; spacing: 8px;
                 HorizontalLayout {
-                    spacing: 8px;
+                    spacing: 12px;
                     cross-axis-alignment: center;
-                    balance-heading := Label { text: "BALANCE"; }
-                    balance-readout := Text { width: 85px; text: root.balance-label; color: Appearance.accent-text; }
-                    GraphLabel { text: "−"; }
-                    Slider {
-                        horizontal-stretch: 1;
-                        enabled: !root.listening-to-a;
-                        minimum: -1; maximum: 1; step: 0.05; value <=> root.balance;
-                        Tooltip { text: @markdown("Shift the output toward the left or right channel."); }
-                        accessible-label: "Balance";
-                        changed(value) => { root.change-balance(value); }
-                    }
-                    GraphLabel { text: "+"; }
+                    PanelHeading { text: "Equalizer Points"; }
                     Button {
-                        text: "Center"; enabled: !root.listening-to-a; clicked => { root.change-balance(0); }
-                        Tooltip { text: @markdown("Reset the balance to the center."); }
+                        text: root.fitting-eq ? "Fitting…" : root.spline-eq ? "Use Parametric" : "Use Spline";
+                        accessible-label: self.text + " From EQ Bands";
+                        enabled: !root.listening-to-a && !root.fitting-eq;
+                        Tooltip { text: @markdown("Switch editors and keep the current EQ curve."); }
+                        clicked => { root.toggle-eq-mode(); }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    Label { text: root.spline-eq ? "Point Count" : "Band Count"; }
+                    band-count-control := SpinBox {
+                        width: 84px;
+                        enabled: !root.listening-to-a;
+                        Tooltip { text: root.spline-eq
+                            ? @markdown("Set the number of points. The 20 Hz and 20 kHz endpoints are required.")
+                            : @markdown("Set the number of editable EQ bands."); }
+                        minimum: root.spline-eq ? 2 : 0; maximum: 32; value <=> root.band-count;
+                        edited(value) => { root.change-count(value); }
                     }
                 }
-            }
-        }
-        if root.show-band-list: HorizontalLayout {
-            spacing: 12px;
-            Text { text: root.spline-eq ? "Spline points" : "Equalizer bands"; color: Graphite.text; font-size: 17px; }
-            Rectangle { horizontal-stretch: 1; }
-            Label { text: root.spline-eq ? "Point count" : "Band count"; }
-            SpinBox {
-                enabled: !root.listening-to-a;
-                Tooltip { text: root.spline-eq
-                    ? @markdown("Set the number of points. The 20 Hz and 20 kHz endpoints are required.")
-                    : @markdown("Set the number of editable EQ bands."); }
-                minimum: root.spline-eq ? 2 : 0; maximum: 32; value <=> root.band-count;
-                edited(value) => { root.change-count(value); }
-            }
-        }
-        if root.show-band-list: VerticalLayout {
-                spacing: 7px;
                 for band[index] in root.bands: Rectangle {
-                    height: 46px; background: Graphite.panel; border-radius: 7px;
+                    height: 46px;
+                    background: Graphite.window;
+                    border-radius: 8px;
+                    border-color: band.enabled ? Graphite.border : Graphite.window;
+                    border-width: 1px;
                     HorizontalLayout {
                         padding: 7px; spacing: 10px;
-                        Text { text: index + 1; color: Appearance.accent-text; width: 24px; vertical-alignment: center; }
+                        Text { text: index + 1; color: Appearance.accent; width: 24px; vertical-alignment: center; }
                         if !root.spline-eq: CheckBox {
                             enabled: !root.listening-to-a;
                             Tooltip { text: @markdown("Enable or disable this filter."); }
@@ -1160,6 +1167,7 @@ export component MainWindow inherits Window {
                             horizontal-stretch: 1; minimum: -24; maximum: 24; step: 0.1; value: band.gain;
                             accessible-label: "Band " + (index + 1) + " gain";
                             changed(value) => { root.edit-band-gain(index, value); }
+                            released => { root.finish-edit(); }
                         }
                         Label { text: band.gain-label; width: 72px; horizontal-alignment: right; }
                         if !root.spline-eq: Label { text: "Q"; width: 14px; }
@@ -1180,51 +1188,144 @@ export component MainWindow inherits Window {
                         }
                     }
                 }
+            }
         }
-        if root.notice != "": Text { text: root.notice; color: #f0c987; wrap: word-wrap; font-size: 12px; }
-        }
+        if !root.simple-layout && root.notice != "": Text { text: root.notice; color: Appearance.accent; wrap: word-wrap; font-size: 12px; }
+        Rectangle { min-height: 0px; vertical-stretch: 1; }
         HorizontalLayout {
             spacing: 8px;
-            Rectangle { width: 7px; height: 7px; border-radius: 4px; background: root.connected ? Appearance.graph-accent : #f0c987; }
+            Rectangle { width: 7px; height: 7px; border-radius: 4px; background: root.connected ? Appearance.accent : Graphite.secondary; }
             Label { text: root.status; font-size: 11px; }
             Label { text: root.title + " · " + root.app-version; font-size: 10px; horizontal-alignment: right; }
         }
     }
     }
+    top-controls := VerticalLayout {
+        x: 18px;
+        y: root.simple-layout ? 18px : 18px + window-scroll.content-y;
+        width: window-scroll.visible-width - 36px;
+        height: 118px;
+        spacing: 14px;
+        toolbar := Panel {
+            height: 56px;
+            background: Graphite.window;
+            HorizontalLayout {
+                padding-left: 12px; padding-right: 12px; spacing: 10px;
+                cross-axis-alignment: center;
+                Image {
+                    width: 34px; height: 34px; source: root.icon;
+                }
+                app-title := Text {
+                    text: root.title; color: Graphite.text;
+                    font-size: 22px; letter-spacing: -0.35px;
+                    min-width: 0px;
+                    vertical-alignment: center; overflow: elide;
+                }
+                Rectangle {
+                    width: 146px; height: 36px; border-radius: 8px;
+                    background: Graphite.window;
+                    border-color: Graphite.border; border-width: 1px;
+                    HorizontalLayout {
+                        padding: 2px; spacing: 2px;
+                        Button {
+                            text: "Simple"; primary: root.simple-layout;
+                            Tooltip { text: @markdown("Use Bass, Mid, Treble, Loudness, and preamp."); }
+                            clicked => { root.change-layout(true); }
+                        }
+                        Button {
+                            text: "Standard"; primary: !root.simple-layout;
+                            Tooltip { text: @markdown("Edit individual EQ bands, preamp, and balance."); }
+                            clicked => { root.change-layout(false); }
+                        }
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                Button {
+                    text: "Undo"; width: 60px; height: 32px; enabled: root.can-undo;
+                    Tooltip { text: @markdown("Undo the last EQ action. Up to 15 actions are kept."); }
+                    clicked => { root.undo(); }
+                }
+                preset-menu-button := Button {
+                    visible: root.show-preset-button;
+                    text: "Select Preset"; width: 108px; height: 32px;
+                    Tooltip { text: @markdown("Load and manage EQ presets and output links."); }
+                    clicked => {
+                        root.preset-overwrite-message = "";
+                        preset-menu.show();
+                    }
+                }
+                settings-button := Button {
+                    text: "Settings"; width: 72px; height: 32px;
+                    Tooltip { text: @markdown("Choose what to display and configure playback."); }
+                    clicked => { settings.show(); }
+                }
+            }
+            Rectangle {
+                x: 13px; y: parent.height - 1px;
+                width: parent.width - 26px; height: 1px;
+                background: @linear-gradient(90deg, Appearance.accent 0%, Graphite.border 58%);
+            }
+        }
+        HorizontalLayout {
+            height: 48px;
+            equalizer-box := Panel {
+                width: 224px;
+                HorizontalLayout {
+                    padding-left: 12px; padding-right: 8px;
+                    spacing: 8px; cross-axis-alignment: center;
+                    PanelHeading {
+                        text: "Equalizer On Off";
+                        horizontal-stretch: 1;
+                    }
+                    Button {
+                        text: root.bypass ? "Off" : "On";
+                        primary: !root.bypass;
+                        width: 48px; height: 32px;
+                        accessible-label: "Enable Equalizer";
+                        accessible-checkable: true;
+                        accessible-checked: !root.bypass;
+                        Tooltip { text: @markdown("Turn equalization and stereo balance on or off."); }
+                        clicked => {
+                            root.bypass = !root.bypass;
+                            root.change-bypass(root.bypass);
+                        }
+                    }
+                }
+            }
+            Rectangle { horizontal-stretch: 1; }
+        }
+    }
     }
     settings := PopupWindow {
         width: 420px;
-        height: 368px + (root.simple-layout ? 0px : 34px);
+        height: 368px + (root.simple-layout ? 0px : 34px)
+            + (root.has-login-start ? 31px : 0px) + (root.login-start-error == "" ? 0px : 36px);
         x: settings-button.absolute-position.x + settings-button.width - self.width;
         y: settings-button.absolute-position.y + settings-button.height + 8px;
         close-policy: close-on-click-outside;
         Rectangle {
-            background: Graphite.panel;
+            background: Graphite.window;
             border-color: Graphite.border;
             border-width: 1px;
             border-radius: 12px;
             colors-form := VerticalLayout {
                 private property <string> color-error;
-                function submit(graph: string, text: string) {
-                    self.color-error = root.change-colors(graph, text);
+                function submit(value: string) {
+                    self.color-error = root.change-colors(value);
                     if (self.color-error == "") {
-                        graph-color.value = Appearance.graph-hex;
-                        text-color.value = Appearance.text-hex;
+                        accent-field.value = Appearance.accent-hex;
                     }
-                }
-                function apply() {
-                    self.submit(graph-color.value, text-color.value);
                 }
                 padding: 16px;
                 spacing: 10px;
-                GraphLabel { text: "VIEW"; color: Appearance.accent-text; }
+                GraphLabel { text: "VIEW"; color: Appearance.accent; }
                 HorizontalLayout {
                     spacing: 12px;
                     VerticalLayout {
                         spacing: 8px;
                         CheckBox {
-                            text: "Live View"; checked <=> root.show-live-view;
-                            Tooltip { text: @markdown("Live visualizations can increase CPU use. Turn off Live View to reduce it."); }
+                            text: "Live Monitor"; checked <=> root.show-live-view;
+                            Tooltip { text: @markdown("Live visualizations can increase CPU use. Turn off Live Monitor to reduce it."); }
                             toggled => { root.change-live-view(self.checked); }
                         }
                         CheckBox { text: "Band list"; checked <=> root.show-band-list; }
@@ -1247,7 +1348,7 @@ export component MainWindow inherits Window {
                     }
                 }
                 Rectangle { height: 1px; background: Graphite.divider; }
-                GraphLabel { text: "PLAYBACK"; color: Appearance.accent-text; }
+                GraphLabel { text: "PLAYBACK"; color: Appearance.accent; }
                 HorizontalLayout {
                     spacing: 12px;
                     Label { text: "Output device"; width: 100px; }
@@ -1257,45 +1358,50 @@ export component MainWindow inherits Window {
                         selected => { root.choose-output(self.current-index); }
                     }
                 }
+                if root.has-login-start: CheckBox {
+                    text: "Start on login";
+                    checked <=> root.login-start;
+                    Tooltip { text: @markdown("Open the equalizer when you sign in to your Linux desktop."); }
+                    toggled => {
+                        root.login-start-error = root.change-login-start(self.checked);
+                        if (root.login-start-error != "") { self.checked = !self.checked; }
+                    }
+                }
+                if root.login-start-error != "": Label {
+                    text: root.login-start-error; color: Appearance.accent; wrap: word-wrap;
+                }
                 if !root.simple-layout: HorizontalLayout {
                     height: 24px;
                     spacing: 12px;
-                    Label { text: "EQ type"; width: 100px; }
+                    Label { text: "EQ Type"; width: 100px; }
                     Label { text: root.spline-eq ? "Spline" : "Parametric"; }
                     Rectangle { horizontal-stretch: 1; }
-                    if !root.spline-eq: Button {
-                        text: "Use spline";
-                        enabled: !root.listening-to-a;
-                        Tooltip { text: @markdown("Convert the active tuning to spline points with fixed endpoints at 20 Hz and 20 kHz. Reselect the preset to restore its saved filters."); }
-                        clicked => { root.enable-spline(); }
+                    Button {
+                        text: root.fitting-eq ? "Fitting…" : root.spline-eq ? "Use Parametric" : "Use Spline";
+                        enabled: !root.listening-to-a && !root.fitting-eq;
+                        Tooltip { text: @markdown("Switch editors and keep the current EQ curve."); }
+                        clicked => { root.toggle-eq-mode(); }
                     }
                 }
                 Rectangle { height: 1px; background: Graphite.divider; }
-                GraphLabel { text: "COLORS"; color: Appearance.accent-text; }
-                HorizontalLayout {
-                    spacing: 8px;
-                    graph-color := ColorField {
-                        label: "Graphs"; swatch: Appearance.graph-accent; value: Appearance.graph-hex;
-                        accepted => { colors-form.apply(); }
-                    }
-                    text-color := ColorField {
-                        label: "Accent text"; swatch: Appearance.accent-text; value: Appearance.text-hex;
-                        accepted => { colors-form.apply(); }
-                    }
+                GraphLabel { text: "APPEARANCE"; color: Appearance.accent; }
+                accent-field := ColorField {
+                    label: "Accent"; swatch: Appearance.accent; value: Appearance.accent-hex;
+                    accepted => { colors-form.submit(self.value); }
                 }
                 if colors-form.color-error != "": Label {
-                    text: colors-form.color-error; color: Graphite.clip-red; wrap: word-wrap;
+                    text: colors-form.color-error; color: Appearance.accent; wrap: word-wrap;
                 }
                 Rectangle { vertical-stretch: 1; }
                 HorizontalLayout {
                     spacing: 8px;
                     Button {
-                        text: "Apply colors"; clicked => { colors-form.apply(); }
-                        Tooltip { text: @markdown("Apply and save these colors."); }
+                        text: "Apply color"; clicked => { colors-form.submit(accent-field.value); }
+                        Tooltip { text: @markdown("Apply and save the accent color."); }
                     }
                     Button {
-                        text: "Reset colors"; clicked => { colors-form.submit("#77D9BD", "#77D9BD"); }
-                        Tooltip { text: @markdown("Restore and save the original colors."); }
+                        text: "Reset color"; clicked => { colors-form.submit(Appearance.default-accent-hex); }
+                        Tooltip { text: @markdown("Restore the default emerald accent."); }
                     }
                     Rectangle { horizontal-stretch: 1; }
                     Button {
@@ -1314,14 +1420,14 @@ export component MainWindow inherits Window {
         y: (root.height - self.height) / 2;
         close-policy: close-on-click-outside;
         Rectangle {
-            background: Graphite.panel;
+            background: Graphite.window;
             border-color: Graphite.border;
             border-width: 1px;
             border-radius: 12px;
             VerticalLayout {
                 padding: 20px;
                 spacing: 12px;
-                Text { text: "Confirm band removal"; color: Graphite.text; font-size: 19px; font-weight: 700; }
+                Text { text: "Confirm band removal"; color: Graphite.text; font-size: 19px; }
                 Label { text: root.band-removal-message; wrap: word-wrap; }
                 Rectangle { vertical-stretch: 1; }
                 HorizontalLayout {
@@ -1346,7 +1452,7 @@ export component MainWindow inherits Window {
         y: (root.height - self.height) / 2;
         close-policy: close-on-click-outside;
         Rectangle {
-            background: Graphite.panel;
+            background: Graphite.window;
             border-color: Graphite.border;
             border-width: 1px;
             border-radius: 12px;
@@ -1359,7 +1465,7 @@ export component MainWindow inherits Window {
                         spacing: 12px;
                         Image { width: 44px; height: 44px; source: root.icon; }
                         VerticalLayout {
-                            Text { text: root.title; color: Graphite.text; font-size: 20px; font-weight: 700; }
+                            Text { text: root.title; color: Graphite.text; font-size: 20px; }
                             Label { text: "Version " + root.app-version; }
                         }
                     }
@@ -1369,7 +1475,7 @@ export component MainWindow inherits Window {
                             + ". Builds using Slint’s GPL option are distributed under GPLv3.";
                         wrap: word-wrap;
                     }
-                    Label { text: "IBM Plex Mono uses the SIL Open Font License 1.1."; wrap: word-wrap; }
+                    Label { text: "Inter Light uses the SIL Open Font License 1.1."; wrap: word-wrap; }
                     Label {
                         text: "See THIRD_PARTY_NOTICES.md in the source repository for credits and license details.";
                         wrap: word-wrap;
@@ -1402,12 +1508,12 @@ export component MainWindow inherits Window {
     }
     preset-menu := PopupWindow {
         width: 440px;
-        height: min(480px, 166px + root.presets.length * 39px + (root.preset-overwrite-message == "" ? 0px : 20px));
+        height: min(480px, 200px + root.presets.length * 39px + (root.preset-overwrite-message == "" ? 0px : 20px));
         x: preset-menu-button.absolute-position.x + preset-menu-button.width - self.width;
         y: preset-menu-button.absolute-position.y + preset-menu-button.height + 8px;
         close-policy: close-on-click-outside;
         Rectangle {
-            background: Graphite.panel;
+            background: Graphite.window;
             border-color: Graphite.border;
             border-width: 1px;
             border-radius: 10px;
@@ -1434,6 +1540,15 @@ export component MainWindow inherits Window {
                             root.preset-overwrite-message = error == "" ? "Preset updated." : error;
                         }
                     }
+                }
+                HorizontalLayout {
+                    Button {
+                        text: "Import Equalizer APO";
+                        enabled: !root.listening-to-a;
+                        Tooltip { text: @markdown("Import an Equalizer APO text file and save it as a preset."); }
+                        clicked => { preset-menu.close(); root.import-apo(); }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
                 }
                 if root.preset-overwrite-message != "": Label {
                     text: root.preset-overwrite-message;
@@ -1466,7 +1581,7 @@ export component MainWindow inherits Window {
                         Button { text: "Save"; clicked => { name-form.submit(); } Tooltip { text: @markdown("Save this preset name."); } }
                         Button { text: "Cancel"; clicked => { name-form.naming = false; } Tooltip { text: @markdown("Close without saving."); } }
                     }
-                    if self.naming && self.error != "": Label { text: name-form.error; color: #f0c987; }
+                    if self.naming && self.error != "": Label { text: name-form.error; color: Appearance.accent; }
                 }
                 Label {
                     text: root.active-output-label == "" ? "No active playback output"

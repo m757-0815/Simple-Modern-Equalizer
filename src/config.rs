@@ -11,6 +11,7 @@ static APO_COPY: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(
 
 pub const MANUAL_PREAMP_LIMIT_DB: f64 = 12.0;
 pub const MAX_BANDS: usize = 32;
+pub const MAX_NAME_BYTES: usize = 160;
 pub const MIN_FREQUENCY: f64 = 20.0;
 pub const MAX_FREQUENCY: f64 = 20000.0;
 
@@ -42,7 +43,21 @@ pub struct Config {
     pub show_live_view: bool,
     #[serde(default)]
     pub spline: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spline_source: Option<SplineSource>,
+    /// Bands for the other editor. Both sets continue to shape the EQ.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub other_mode_bands: Option<Vec<Band>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fit_target: Option<crate::fit::Target>,
     pub bands: Vec<Band>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct SplineSource {
+    pub bands: Vec<Band>,
+    sample_rate: f64,
 }
 
 impl Default for Config {
@@ -56,6 +71,9 @@ impl Default for Config {
             bypass: false,
             show_live_view: true,
             spline: false,
+            spline_source: None,
+            other_mode_bands: None,
+            fit_target: None,
             bands: (0..5).map(|i| Band::flat(i, 5)).collect(),
         }
     }
@@ -106,12 +124,84 @@ impl Config {
         self.validate()
     }
 
+    #[cfg(test)]
+    pub fn convert_to_spline(&mut self, sample_rate: f64) {
+        if let Some(mut points) = self.other_mode_bands.take() {
+            std::mem::swap(&mut self.bands, &mut points);
+            self.other_mode_bands = Some(points);
+            self.spline = true;
+            return;
+        }
+        let mut frequencies = vec![MIN_FREQUENCY, MAX_FREQUENCY];
+        frequencies.extend(self.bands.iter().filter(|band| band.enabled).map(|band| band.frequency_hz));
+        frequencies.sort_by(f64::total_cmp);
+        frequencies.dedup();
+        if frequencies.len() > MAX_BANDS {
+            frequencies = (0..MAX_BANDS)
+                .map(|i| frequencies[i * (frequencies.len() - 1) / (MAX_BANDS - 1)])
+                .collect();
+        }
+        let mut points: Vec<_> = frequencies.into_iter().map(|frequency_hz| Band {
+            frequency_hz, ..Band::flat(0, 1)
+        }).collect();
+        let source = SplineSource { bands: std::mem::take(&mut self.bands), sample_rate };
+        let gains = source.point_gains(&points);
+        for (point, gain_db) in points.iter_mut().zip(gains) {
+            point.gain_db = gain_db;
+        }
+        self.bands = points;
+        self.spline_source = Some(source);
+        self.spline = true;
+    }
+
+    pub fn parametric_bands(&self) -> &[Band] {
+        if self.spline {
+            self.other_mode_bands.as_deref()
+                .or_else(|| self.spline_source.as_ref().map(|source| source.bands.as_slice()))
+                .unwrap_or_default()
+        } else {
+            &self.bands
+        }
+    }
+
+    #[cfg(test)]
+    pub fn convert_to_parametric(&mut self) {
+        let bands = self.other_mode_bands.take()
+            .or_else(|| self.spline_source.as_ref().map(|source| source.bands.clone()))
+            .unwrap_or_default();
+        self.other_mode_bands = Some(std::mem::replace(&mut self.bands, bands));
+        self.spline = false;
+    }
+
+    pub fn spline_points(&self) -> Option<&[Band]> {
+        if self.spline { Some(&self.bands) } else { self.other_mode_bands.as_deref() }
+    }
+
+    pub fn spline_correction(&self) -> std::borrow::Cow<'_, [Band]> {
+        let points = self.spline_points().unwrap_or_default();
+        let Some(source) = &self.spline_source else { return points.into(); };
+        let points = points.iter().cloned().zip(source.point_gains(points))
+            .map(|(mut point, source_gain)| {
+                let correction = point.gain_db - source_gain;
+                point.gain_db = if correction.abs() < 1e-9 { 0.0 } else { correction };
+                point
+            }).collect::<Vec<_>>();
+        points.into()
+    }
+
     pub fn is_edge_frequency(frequency: f64) -> bool {
         frequency == MIN_FREQUENCY || frequency == MAX_FREQUENCY
     }
 
     pub fn locked_point(&self, index: usize) -> bool {
         self.spline && (index == 0 || index == self.bands.len() - 1)
+    }
+
+    pub fn can_place_spline_point(&self, frequency: f64, moving: Option<usize>) -> bool {
+        frequency > MIN_FREQUENCY && frequency < MAX_FREQUENCY
+            && self.bands.iter().enumerate().all(|(index, point)| {
+                moving == Some(index) || crate::spline::points_are_spaced(point.frequency_hz, frequency)
+            })
     }
 
     pub fn sort_bands(&mut self) {
@@ -150,13 +240,10 @@ impl Config {
     }
 
     pub fn add_peak(&mut self, frequency: f64, gain: f64) -> bool {
-        if self.bands.len() >= MAX_BANDS { return false; }
-        let index = self.bands.partition_point(|band| band.frequency_hz <= frequency);
-        if self.spline && (Self::is_edge_frequency(frequency)
-            || index > 0 && self.bands[index - 1].frequency_hz == frequency)
-        {
+        if self.bands.len() >= MAX_BANDS || (self.spline && !self.can_place_spline_point(frequency, None)) {
             return false;
         }
+        let index = self.bands.partition_point(|band| band.frequency_hz <= frequency);
         self.bands.insert(index, Band {
             frequency_hz: frequency, gain_db: gain, edited: Some(true), ..Band::flat(0, 1)
         });
@@ -169,18 +256,30 @@ impl Config {
     pub fn validate(&self) -> Result<(), String> {
         fn within(v: f64, lo: f64, hi: f64) -> bool { v.is_finite() && (lo..=hi).contains(&v) }
         if self.schema_version != 1 { return Err("Unsupported JSON schema version".into()); }
-        if self.name.trim().is_empty() || self.name.len() > 160 { return Err("Name must contain 1–160 characters".into()); }
+        if self.name.trim().is_empty() || self.name.len() > MAX_NAME_BYTES { return Err("Name must contain 1–160 characters".into()); }
         if !within(self.preamp_db, -60.0, 12.0) { return Err("Preamp must be between -60 and +12 dB".into()); }
         if !within(self.balance, -1.0, 1.0) { return Err("Balance must be between -1 and +1".into()); }
-        if self.bands.len() > MAX_BANDS { return Err("A maximum of 32 bands is supported".into()); }
-        if self.spline && (self.bands.first().map(|band| band.frequency_hz) != Some(MIN_FREQUENCY)
-            || self.bands.last().map(|band| band.frequency_hz) != Some(MAX_FREQUENCY)
-            || self.bands.windows(2).any(|pair| pair[0].frequency_hz >= pair[1].frequency_hz)
-            || self.bands.iter().any(|band| !band.enabled))
+        if self.bands.len() > MAX_BANDS || self.other_mode_bands.as_ref().is_some_and(|bands| bands.len() > MAX_BANDS) {
+            return Err("A maximum of 32 bands per editor is supported".into());
+        }
+        if self.fit_target.as_ref().is_some_and(|target| !target.valid()) {
+            return Err("Invalid EQ fitting reference".into());
+        }
+        if let Some(points) = self.spline_points()
+            && (points.first().map(|band| band.frequency_hz) != Some(MIN_FREQUENCY)
+            || points.last().map(|band| band.frequency_hz) != Some(MAX_FREQUENCY)
+            || points.windows(2).any(|pair| pair[0].frequency_hz >= pair[1].frequency_hz)
+            || points.iter().any(|band| !band.enabled))
         {
             return Err("Spline points must be enabled and ordered, from 20 Hz to 20 kHz.".into());
         }
-        for (i, band) in self.bands.iter().enumerate() {
+        if let Some(source) = &self.spline_source
+            && (self.spline_points().is_none() || source.bands.len() > MAX_BANDS || !within(source.sample_rate, 40.0, f64::MAX))
+        {
+            return Err("Invalid source filters for spline EQ".into());
+        }
+        for (i, band) in self.bands.iter().chain(self.other_mode_bands.iter().flatten())
+            .chain(self.spline_source.iter().flat_map(|source| &source.bands)).enumerate() {
             if !["PK", "LS", "HS"].contains(&band.kind.as_str())
                 || !within(band.frequency_hz, 20.0, 20000.0)
                 || !within(band.gain_db, -24.0, 24.0)
@@ -212,7 +311,11 @@ impl Config {
                 .max_by(|a, b| (a[1] / a[0]).total_cmp(&(b[1] / b[0])))
                 .expect("at least both frequency limits");
             let frequency_hz = (widest[0] * widest[1]).sqrt();
-            let gain_db = if self.spline { crate::spline::gain_at(&self.bands, frequency_hz) } else { 0.0 };
+            let gain_db = if self.spline {
+                if !self.can_place_spline_point(frequency_hz, None) { break; }
+                let rate = self.spline_source.as_ref().map_or(48000.0, |source| source.sample_rate);
+                self.response([frequency_hz], rate)[0].clamp(-24.0, 24.0)
+            } else { 0.0 };
             self.bands.push(Band { frequency_hz, gain_db, ..Band::flat(0, 1) });
             self.sort_bands();
         }
@@ -224,12 +327,17 @@ impl Config {
     }
 
     pub fn response(&self, frequencies: impl IntoIterator<Item = f64>, sample_rate: f64) -> Vec<f64> {
-        if self.spline {
-            frequencies.into_iter().map(|frequency| crate::spline::gain_at(&self.bands, frequency)).collect()
-        } else {
-            let bands: Vec<_> = self.bands.iter().map(Band::state).collect();
-            resonance_ipc::fr::response_for_frequencies(&bands, frequencies, sample_rate)
+        let bands = self.parametric_bands();
+        let correction = self.spline_correction();
+        if correction.iter().all(|point| point.gain_db == 0.0) {
+            return parametric_response(bands, frequencies, sample_rate);
         }
+        let frequencies: Vec<_> = frequencies.into_iter().collect();
+        let mut response = parametric_response(bands, frequencies.iter().copied(), sample_rate);
+        for (db, frequency) in response.iter_mut().zip(frequencies) {
+            *db += crate::spline::gain_at(&correction, frequency);
+        }
+        response
     }
 
     pub fn from_json(text: &str) -> Result<Self, String> {
@@ -247,15 +355,20 @@ impl Config {
         // Retain parameters while exporting a bypassed config as inactive lines.
         let off = if self.bypass { "# " } else { "" };
         text.push_str(&format!("{off}Preamp: {} dB\n", self.preamp_db));
-        if self.spline {
-            let points = self.bands.iter().map(|band| format!("{} {}", band.frequency_hz, band.gain_db))
+        for (i, b) in self.parametric_bands().iter().enumerate() {
+            text.push_str(&format!("{off}Filter {}: {} {} Fc {} Hz Gain {} dB Q {}\n",
+                i + 1, if b.enabled { "ON" } else { "OFF" }, b.kind, b.frequency_hz, b.gain_db, b.q));
+        }
+        let correction = self.spline_correction();
+        if !correction.is_empty() && (self.parametric_bands().is_empty()
+            || correction.iter().any(|point| point.gain_db != 0.0))
+        {
+            if correction.iter().any(|point| point.gain_db.abs() > 24.0) {
+                return Err("The spline correction exceeds ±24 dB. Save a JSON preset to keep the full curve.".into());
+            }
+            let points = correction.iter().map(|band| format!("{} {}", band.frequency_hz, band.gain_db))
                 .collect::<Vec<_>>().join("; ");
             text.push_str(&format!("{off}GraphicEQ: {points}\n"));
-        } else {
-            for (i, b) in self.bands.iter().enumerate() {
-                text.push_str(&format!("{off}Filter {}: {} {} Fc {} Hz Gain {} dB Q {}\n",
-                    i + 1, if b.enabled { "ON" } else { "OFF" }, b.kind, b.frequency_hz, b.gain_db, b.q));
-            }
         }
         // Diagonal copy is exact at the balance extremes (zero means actual mute).
         let left = 1.0 - self.balance.max(0.0);
@@ -285,7 +398,11 @@ impl Config {
                     continue;
                 }
                 if key.eq_ignore_ascii_case("GraphicEQ") {
-                    if copied || !cfg.bands.is_empty() { return Err(err()); }
+                    if copied || cfg.spline { return Err(err()); }
+                    let filters = std::mem::take(&mut cfg.bands);
+                    if !filters.is_empty() {
+                        cfg.other_mode_bands = Some(filters);
+                    }
                     for pair in value.trim().trim_end_matches(';').split(';') {
                         let words: Vec<_> = pair.split_whitespace().collect();
                         if words.len() != 2 { return Err(err()); }
@@ -319,7 +436,23 @@ impl Config {
         cfg.validate()?;
         cfg.preamp_db = cfg.preamp_db.max(-MANUAL_PREAMP_LIMIT_DB);
         cfg.sort_bands();
+        if let Some(bands) = &mut cfg.other_mode_bands {
+            bands.sort_by(|left, right| left.frequency_hz.total_cmp(&right.frequency_hz));
+        }
         Ok(cfg)
+    }
+}
+
+fn parametric_response(bands: &[Band], frequencies: impl IntoIterator<Item = f64>, sample_rate: f64) -> Vec<f64> {
+    let bands: Vec<_> = bands.iter().map(Band::state).collect();
+    resonance_ipc::fr::response_for_frequencies(&bands, frequencies, sample_rate)
+}
+
+impl SplineSource {
+    fn point_gains(&self, points: &[Band]) -> Vec<f64> {
+        let frequencies = points.iter().map(|point| point.frequency_hz);
+        parametric_response(&self.bands, frequencies, self.sample_rate)
+            .into_iter().map(|gain| gain.clamp(-24.0, 24.0)).collect()
     }
 }
 
@@ -365,6 +498,9 @@ mod tests {
         assert!(cfg.spline);
         assert_eq!(cfg.bands[0].gain_db, 1.0);
         assert_eq!(cfg.bands.last().unwrap().gain_db, -2.0);
+        assert!(!cfg.add_peak(21.0, 1.0));
+        assert!(!cfg.add_peak(510.0, 1.0));
+        assert!(!cfg.can_place_spline_point(490.0, Some(1)));
         cfg.bands.last_mut().unwrap().edited = Some(true);
         assert_eq!(cfg.protected_band_count(2), 3);
         cfg.resize(0);
@@ -372,7 +508,11 @@ mod tests {
         assert!(cfg.locked_point(0) && cfg.locked_point(1));
         assert_eq!(cfg.bands[1].gain_db, -2.0);
         assert!(!cfg.add_peak(MIN_FREQUENCY, 10.0));
-        cfg.resize(9);
+        cfg.resize(MAX_BANDS);
+        assert_eq!(cfg.bands.len(), MAX_BANDS);
+        assert!(cfg.bands.windows(2).all(|pair| {
+            crate::spline::points_are_spaced(pair[0].frequency_hz, pair[1].frequency_hz)
+        }));
         assert!(cfg.validate().is_ok());
         let apo = Config::from_apo(&cfg.to_apo().unwrap()).unwrap();
         assert!(apo.spline);
@@ -380,6 +520,15 @@ mod tests {
             assert_eq!(expected.frequency_hz, actual.frequency_hz);
             assert_eq!(expected.gain_db, actual.gain_db);
         }
+    }
+
+    #[test]
+    fn tightly_spaced_saved_spline_points_keep_their_frequencies() {
+        let cfg = Config::from_apo("GraphicEQ: 100 1; 102 2; 103 3").unwrap();
+        let loaded = Config::from_json(&serde_json::to_string(&cfg).unwrap()).unwrap();
+        assert_eq!(loaded.bands, cfg.bands);
+        assert!(!loaded.can_place_spline_point(104.0, Some(3)));
+        assert!(loaded.can_place_spline_point(130.0, Some(3)));
     }
     #[test] fn bypass_is_flat_and_balance_never_boosts() {
         let mut cfg = Config::default(); cfg.balance = 1.0;

@@ -13,6 +13,8 @@ mod config;
 mod ipc_server;
 mod ir;
 mod meters;
+#[cfg(target_os = "linux")]
+mod monitor;
 mod session;
 mod shutdown;
 mod spectrum;
@@ -485,6 +487,8 @@ async fn main() -> Result<()> {
     let pw_handle = audio::spawn(audio::BackendCtx {
         cmd_rx,
         spectrum_tx,
+        #[cfg(target_os = "linux")]
+        monitor: monitor::spawn(shared.clone()),
         initial_chain,
         output_tx,
         route_rx,

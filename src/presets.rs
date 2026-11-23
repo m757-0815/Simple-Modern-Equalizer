@@ -99,6 +99,7 @@ pub struct Preferences {
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct DisplayPreferences {
+    // Keep the on-disk ids for the remaining modes. Zero and one were Analog VU and Spectrum.
     pub live_mode: i32,
     pub band_list: bool,
     pub levels: bool,
@@ -107,10 +108,16 @@ pub struct DisplayPreferences {
     pub eq_spectrum: bool,
 }
 
+impl DisplayPreferences {
+    pub fn live_mode_index(&self) -> i32 {
+        self.live_mode.saturating_sub(2).clamp(0, crate::live::STEREO_FIELD_MODE)
+    }
+}
+
 impl Default for DisplayPreferences {
     fn default() -> Self {
         Self {
-            live_mode: 0, band_list: true, levels: true,
+            live_mode: 2, band_list: true, levels: true,
             clipping: true, preset_button: true, eq_spectrum: false,
         }
     }
@@ -152,6 +159,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn saved_live_display_ids_survive_removed_displays() {
+        for (saved, expected) in [
+            (0, crate::live::BARS_MODE),
+            (1, crate::live::BARS_MODE),
+            (2, crate::live::BARS_MODE),
+            (3, crate::scope::MODE),
+            (4, crate::live::STEREO_LEVEL_MODE),
+            (5, crate::live::BEFORE_AFTER_MODE),
+            (6, crate::live::LOUDNESS_HISTORY_MODE),
+            (7, crate::live::STEREO_FIELD_MODE),
+        ] {
+            let display: DisplayPreferences =
+                serde_json::from_str(&format!(r#"{{"live_mode":{saved}}}"#)).unwrap();
+            assert_eq!(display.live_mode_index(), expected);
+        }
+    }
+
+
+    #[test]
     fn bundled_catalog_is_valid_and_preserves_legacy_keys() {
         let catalog: Vec<Config> = serde_json::from_str(include_str!("../presets/catalog.json")).unwrap();
         let mut ids = std::collections::HashSet::from([String::from("builtin:Flat")]);
@@ -188,7 +214,7 @@ mod tests {
         let legacy = serde_json::from_str::<Preferences>(r#"{"display":{"eq_graph":false}}"#).unwrap();
         assert_eq!(legacy.eq_plot_height(), 260.0);
         assert_eq!(legacy.colors, crate::theme::ThemeColors::default());
-        preferences.colors = crate::theme::ThemeColors::parse("#AABBCC", "#F1E2D3").unwrap();
+        preferences.colors = crate::theme::ThemeColors::parse("#AABBCC").unwrap();
         preferences.eq_plot_height = 1600;
         preferences.outputs.insert("DAC endpoint ID".into(), id.clone());
         preferences.save(&directory).unwrap();

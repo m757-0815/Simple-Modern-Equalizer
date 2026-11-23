@@ -1,4 +1,4 @@
-use crate::config::{Band, Config};
+use crate::config::{Band, Config, SplineSource};
 use crate::plot_canvas::{Canvas, RasterSize};
 use crate::theme::{PLOT_GRID, PLOT_ZERO, ThemeColors};
 use slint::{Rgba8Pixel, SharedPixelBuffer};
@@ -68,13 +68,10 @@ impl BandDrag {
         let mut moved = current.clone();
         (moved.frequency_hz, moved.gain_db) = drag_values(self.frequency, self.gain, dx, dy, self.gain_span);
         if cfg.spline {
-            if cfg.locked_point(self.index) {
-                moved.frequency_hz = self.frequency;
-            } else {
-                moved.frequency_hz = moved.frequency_hz.clamp(crate::config::MIN_FREQUENCY + 0.1, crate::config::MAX_FREQUENCY - 0.1);
-                if cfg.bands.iter().enumerate().any(|(i, band)| i != self.index && band.frequency_hz == moved.frequency_hz) {
-                    moved.frequency_hz = current.frequency_hz;
-                }
+            if cfg.locked_point(self.index) || (moved.frequency_hz != current.frequency_hz
+                && !cfg.can_place_spline_point(moved.frequency_hz, Some(self.index)))
+            {
+                moved.frequency_hz = current.frequency_hz;
             }
         } else if moved.kind == "PK" && moved.frequency_hz != current.frequency_hz {
             moved.q = if moved.frequency_hz == self.frequency {
@@ -117,6 +114,8 @@ pub struct GraphCache {
     bands: Vec<Band>,
     bypass: bool,
     spline: bool,
+    spline_source: Option<SplineSource>,
+    other_mode_bands: Option<Vec<Band>>,
     output_offset: f64,
     sample_rate: f64,
     pub axis: GainAxis,
@@ -129,7 +128,7 @@ pub struct GraphCache {
 
 impl GraphCache {
     pub fn set_colors(&mut self, colors: ThemeColors) {
-        if self.colors.graph != colors.graph {
+        if self.colors.accent != colors.accent {
             self.colors = colors;
             self.rendered_size = None;
         }
@@ -147,10 +146,21 @@ impl GraphCache {
         if self.sample_rate == 0.0 {
             return false;
         }
-        let dots: Vec<_> = cfg.bands.iter().filter(|_| cfg.spline).map(|band| {
+        let dots: Vec<_> = cfg.bands.iter().map(|band| {
             let (x, _) = position(band.frequency_hz, band.gain_db);
-            let y = (self.axis.top - band.gain_db) / self.axis.span();
-            Dot { x, y, enabled: !cfg.bypass }
+            let y = if cfg.spline && !cfg.bypass && !self.curve.is_empty() {
+                // The sampled curve includes both editors' filters. The saved
+                // spline gain is relative to the filters at conversion time.
+                let sample = (x * W as f64 - 0.5).clamp(0.0, (self.curve.len() - 1) as f64);
+                let left = sample.floor() as usize;
+                let right = sample.ceil() as usize;
+                let a = f64::from(self.curve[left]);
+                let b = f64::from(self.curve[right]);
+                (a + (b - a) * sample.fract() + 0.5) / H as f64
+            } else {
+                (self.axis.top - band.gain_db) / self.axis.span()
+            };
+            Dot { x, y, enabled: !cfg.bypass && band.enabled }
         }).collect();
         if self.dots == dots {
             return false;
@@ -162,12 +172,16 @@ impl GraphCache {
     pub fn frame(&mut self, cfg: &Config, spectrum: &[f32], sample_rate: f64, size: RasterSize) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
         let rate = if sample_rate.is_finite() && sample_rate > 0.0 { sample_rate } else { 48000.0 };
         let preamp = if cfg.bypass { 0.0 } else { cfg.preamp_db };
+        let direct_points = cfg.spline_points().filter(|_| !cfg.bypass
+            && cfg.spline_source.is_none() && cfg.parametric_bands().is_empty());
         // Keep EQ geometry in band-gain coordinates; the scale includes effective preamp.
         let changed = self.sample_rate == 0.0 || self.bypass != cfg.bypass || self.spline != cfg.spline ||
-            self.bands != cfg.bands || self.output_offset != preamp || (!cfg.bypass && self.sample_rate != rate);
+            self.bands != cfg.bands || self.spline_source != cfg.spline_source ||
+            self.other_mode_bands != cfg.other_mode_bands ||
+            self.output_offset != preamp || (!cfg.bypass && self.sample_rate != rate);
         if changed {
             self.output_offset = preamp;
-            let levels = if cfg.spline {
+            let levels = if direct_points.is_some() {
                 Vec::new()
             } else if cfg.bypass {
                 vec![0.0; W]
@@ -180,6 +194,8 @@ impl GraphCache {
                 (y * (H - 1) as f64) as f32
             }).collect();
             self.bands.clone_from(&cfg.bands);
+            self.spline_source.clone_from(&cfg.spline_source);
+            self.other_mode_bands.clone_from(&cfg.other_mode_bands);
             self.bypass = cfg.bypass;
             self.spline = cfg.spline;
             self.sample_rate = rate;
@@ -191,8 +207,8 @@ impl GraphCache {
         self.rendered_spectrum.clear();
         self.rendered_spectrum.extend_from_slice(visible);
         self.rendered_size = Some(size);
-        let path = if cfg.spline {
-            band_spline(&self.bands, self.axis)
+        let path = if let Some(points) = direct_points {
+            band_spline(points, self.axis)
         } else {
             response_path(&self.curve)
         };
@@ -253,7 +269,7 @@ fn render(curve: Option<&Path>, axis: GainAxis, offset: f64, bypass: bool, spect
         canvas.rect(x, 0.0, 1.0, H as f32, PLOT_GRID);
     }
     if let Some(path) = curve {
-        canvas.stroke(path, if bypass { [134, 134, 142] } else { colors.graph }, 2.0);
+        canvas.stroke(path, if bypass { [134, 134, 142] } else { colors.accent }, 2.0);
     }
     canvas.finish()
 }
@@ -272,6 +288,10 @@ mod tests {
         assert_eq!(config.bands[0].frequency_hz, 20.0);
         let untouched = [config.bands[0].clone(), config.bands[2].clone(), config.bands[3].clone()];
         let mut drag = BandDrag::new(1, &config.bands[1]);
+        let too_close = (980.0_f64 / 100.0).log10() / 3.0;
+        assert!(drag.update(&mut config, too_close, 0.1));
+        assert_eq!(config.bands[1].frequency_hz, 100.0);
+        assert!(config.bands[1].gain_db < 2.0);
         assert!(drag.update(&mut config, 0.5, 0.1));
         assert_eq!(drag.index, 2);
         assert_eq!([&config.bands[0], &config.bands[1], &config.bands[3]], untouched.each_ref());
@@ -279,6 +299,66 @@ mod tests {
     }
 
     const TEST_SIZE: RasterSize = RasterSize { width: W as u32, height: H as u32 };
+
+    #[test]
+    fn switching_to_spline_preserves_the_parametric_curve() {
+        let mut config = Config::default();
+        config.bands[0].kind = "LS".into();
+        config.bands[0].gain_db = 8.0;
+        config.bands[2].gain_db = -12.0;
+        config.bands[2].q = 20.0;
+        config.bands[4].kind = "HS".into();
+        config.bands[4].gain_db = 6.0;
+        config.preamp_db = -5.0;
+        let mut cache = GraphCache::default();
+        let before = cache.frame(&config, &[], 48000.0, TEST_SIZE).unwrap();
+        cache.update_dots(&config);
+        assert_eq!(cache.dots.len(), config.bands.len());
+        assert_eq!(hit_band(&cache.dots, cache.dots[2].x, cache.dots[2].y, W as f64, H as f64), Some(2));
+        config.convert_to_spline(48000.0);
+        config.validate().unwrap();
+        let after = cache.frame(&config, &[], 48000.0, TEST_SIZE).unwrap();
+        assert_eq!(before.as_bytes(), after.as_bytes());
+        config.bands[3].gain_db += 2.0;
+        let edited = cache.frame(&config, &[], 48000.0, TEST_SIZE).unwrap();
+        assert_ne!(edited.as_bytes(), after.as_bytes());
+        cache.update_dots(&config);
+        let low_handle = cache.dots[0];
+        config.convert_to_parametric();
+        assert_eq!(config.bands.len(), 5);
+        Config::from_json(&serde_json::to_string(&config).unwrap()).unwrap();
+        let restored = cache.frame(&config, &[], 48000.0, TEST_SIZE).unwrap();
+        assert_eq!(edited.as_bytes(), restored.as_bytes());
+
+        config.bands[0].gain_db -= 2.0;
+        let edited = cache.frame(&config, &[], 48000.0, TEST_SIZE).unwrap();
+        config.convert_to_spline(48000.0);
+        let restored = cache.frame(&config, &[], 48000.0, TEST_SIZE).unwrap();
+        assert_eq!(edited.as_bytes(), restored.as_bytes());
+        cache.update_dots(&config);
+        assert_eq!(cache.dots[0].x, low_handle.x);
+        assert!(cache.dots[0].y > low_handle.y + 0.02);
+        for dot in &cache.dots {
+            let x = ((dot.x * W as f64).floor() as usize).min(W - 1);
+            let y = ((dot.y * H as f64).floor() as usize).min(H - 1);
+            assert!((y.saturating_sub(1)..=(y + 1).min(H - 1)).any(|row| {
+                let offset = 4 * (row * W + x);
+                restored.as_bytes()[offset..offset + 3] == cache.colors.accent
+            }), "spline handle at ({x}, {y}) is off the response curve");
+        }
+    }
+
+    #[test]
+    fn switching_a_spline_only_preset_preserves_its_curve() {
+        let mut config = Config::flat_spline();
+        config.bands[0].gain_db = 6.0;
+        config.bands[1].gain_db = -5.0;
+        let mut cache = GraphCache::default();
+        let before = cache.frame(&config, &[], 48000.0, TEST_SIZE).unwrap();
+        config.convert_to_parametric();
+        let after = cache.frame(&config, &[], 48000.0, TEST_SIZE).unwrap();
+        assert_eq!(before.as_bytes(), after.as_bytes());
+    }
 
     #[test]
     fn resizing_rerasterizes_the_eq_without_recalculating_its_response() {
@@ -304,9 +384,9 @@ mod tests {
             &image.as_bytes()[offset..offset + 3]
         };
         let background = crate::theme::PLOT_BACKGROUND;
-        assert_eq!(pixel(120), colors.graph);
+        assert_eq!(pixel(120), colors.accent);
         let edge = pixel(119);
-        assert!(edge[1] > background[1] && edge[1] < colors.graph[1]);
+        assert!(edge[1] > background[1] && edge[1] < colors.accent[1]);
     }
 
     #[test]
@@ -333,7 +413,7 @@ mod tests {
         let mut cache = GraphCache::default();
         cache.frame(&cfg, &[], 16000.0, TEST_SIZE);
         cache.update_dots(&cfg);
-        assert!(cache.dots.is_empty());
+        assert_eq!(cache.dots.len(), cfg.bands.len());
         assert!(cache.curve[W - 70..].iter().all(|y| *y == cache.curve[W - 1]));
     }
 

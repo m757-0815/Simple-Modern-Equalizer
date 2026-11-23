@@ -21,7 +21,7 @@ impl From<&DaemonState> for AudioFormat {
 
 #[derive(Default)]
 pub struct Shared {
-    prepared: Option<(AudioFormat, Config)>,
+    prepared: Option<(AudioFormat, Arc<Config>)>,
     pub target: Option<Option<String>>,
     pub state: Option<DaemonState>,
     pub status: String,
@@ -29,13 +29,15 @@ pub struct Shared {
     pub scope_requested: bool,
     pub meter_capture_requested: bool,
     pub playback_levels: Option<([f32; 2], f32)>,
-    pub scope_samples: Option<Vec<f32>>,
+    pub scope_samples: Option<Arc<[f32]>>,
     pub spectrum_requested: Option<crate::spectrum::Resolution>,
-    pub spectrum_levels: Option<crate::spectrum::Levels>,
+    pub spectrum_levels: Option<Arc<crate::spectrum::Levels>>,
+    pub monitor_mode: Option<i32>,
+    pub monitor_signal: Option<Arc<crate::monitor::Signal>>,
 }
 
 impl Shared {
-    fn prepared_for(&self, format: &AudioFormat) -> Option<Config> {
+    fn prepared_for(&self, format: &AudioFormat) -> Option<Arc<Config>> {
         self.prepared.as_ref()
             .filter(|(prepared_format, _)| prepared_format == format)
             .map(|(_, cfg)| cfg.clone())
@@ -76,22 +78,21 @@ fn update_plan(previous: Option<&Config>, cfg: &Config, channels: usize, sample_
         }
     };
     let supported = |frequency: f64| frequency < sample_rate / 2.0;
+    let bands = cfg.parametric_bands();
     let Some(old) = previous.filter(|old| {
-        if old.spline != cfg.spline {
-            return false;
-        }
-        cfg.spline || (old.bands.len() == cfg.bands.len() && old.bands.iter().zip(&cfg.bands).all(|(a, b)| {
+        let old_bands = old.parametric_bands();
+        old_bands.len() == bands.len() && old_bands.iter().zip(bands).all(|(a, b)| {
             // A preset may omit a band above Nyquist. Do not assume its
             // indices still identify the other bands in that situation.
             supported(a.frequency_hz) == supported(b.frequency_hz)
                 && (!supported(a.frequency_hz) || a.kind == b.kind)
-        }))
+        })
     }) else {
         return Ok(vec![
             Command::ApplyState {
                 preamp_db: cfg.preamp_db,
                 enabled: !cfg.bypass,
-                bands: cfg.bands.iter().filter(|band| !cfg.spline && supported(band.frequency_hz)).map(|band| band.state()).collect(),
+                bands: bands.iter().filter(|band| supported(band.frequency_hz)).map(|band| band.state()).collect(),
                 effects: EffectsState::default(),
             },
             routing(),
@@ -105,8 +106,8 @@ fn update_plan(previous: Option<&Config>, cfg: &Config, channels: usize, sample_
     if cfg.preamp_db < old.preamp_db {
         commands.push(Command::SetPreamp { db: cfg.preamp_db });
     }
-    for (index, (before, after)) in old.bands.iter().zip(&cfg.bands)
-        .filter(|(_, band)| !cfg.spline && supported(band.frequency_hz)).enumerate()
+    for (index, (before, after)) in old.parametric_bands().iter().zip(bands)
+        .filter(|(_, band)| supported(band.frequency_hz)).enumerate()
     {
         if before.enabled && !after.enabled {
             commands.push(Command::SetBandEnabled { index, enabled: false });
@@ -130,9 +131,10 @@ fn update_plan(previous: Option<&Config>, cfg: &Config, channels: usize, sample_
     Ok(commands)
 }
 
-fn active_spline(config: &Config) -> Option<&[Band]> {
-    (config.spline && !config.bypass && config.bands.iter().any(|band| band.gain_db != 0.0))
-        .then_some(config.bands.as_slice())
+fn active_spline(config: &Config) -> Option<std::borrow::Cow<'_, [Band]>> {
+    if config.bypass { return None; }
+    let points = config.spline_correction();
+    points.iter().any(|point| point.gain_db != 0.0).then_some(points)
 }
 
 fn update_spline(
@@ -208,13 +210,17 @@ impl Engine {
                     request(&mut client, Command::ClearConvolutionIr)?;
                     request(&mut client, Command::SetDither { bits: None })?;
                     request(&mut client, Command::SetPhaseMode { linear: false })?;
-                    let mut applied: Option<(AudioFormat, Config)> = None;
+                    let mut applied: Option<(AudioFormat, Arc<Config>)> = None;
                     let mut installed_spline: Option<(u32, Vec<Band>)> = None;
                     let mut last_spline_edit = None::<Instant>;
                     let mut route_pending = if cfg!(windows) { None } else { Some(pinned_output.clone()) };
                     let mut route_error = None;
                     let mut capture = crate::scope::Capture::default();
                     let mut analyzer = crate::spectrum::Analyzer::default();
+                    let mut previous_resolution = None;
+                    let mut next_analysis = Instant::now();
+                    let mut previous_monitor_mode = None;
+                    let mut next_monitor_poll = Instant::now();
                     let mut next_poll = Instant::now();
                     loop {
                         if !alive.load(Ordering::Relaxed) { return Ok(()); }
@@ -234,16 +240,79 @@ impl Engine {
                             }
                         }
                         let snapshot = client.get_state().map_err(|e| e.to_string())?;
-                        let (scope_requested, spectrum_requested, meter_capture_requested) = {
+                        let (scope_requested, spectrum_requested, meter_capture_requested, monitor_mode) = {
                             let shared = state.lock().unwrap();
-                            (shared.scope_requested, shared.spectrum_requested, shared.meter_capture_requested)
+                            (shared.scope_requested, shared.spectrum_requested, shared.meter_capture_requested, shared.monitor_mode)
                         };
-                        let audio = capture.read(&mut client, &snapshot, scope_requested || meter_capture_requested || spectrum_requested.is_some());
+                        let stereo_requested = cfg!(windows) && monitor_mode == Some(crate::live::STEREO_FIELD_MODE);
+                        let now = Instant::now();
+                        let analyze = spectrum_requested != previous_resolution
+                            || (spectrum_requested.is_some() && now >= next_analysis);
+                        if analyze {
+                            previous_resolution = spectrum_requested;
+                            next_analysis = (next_analysis + crate::live::ANALYSIS_INTERVAL)
+                                .max(now + crate::live::ANALYSIS_INTERVAL / 2);
+                        }
+                        let frames = if analyze && spectrum_requested.is_some() {
+                            crate::scope::CAPTURE_FRAMES
+                        } else if scope_requested {
+                            crate::scope::waveform_capture_frames(snapshot.sample_rate)
+                        } else {
+                            0
+                        };
+                        let audio = capture.read(
+                            &mut client, &snapshot,
+                            frames > 0 || meter_capture_requested || stereo_requested,
+                            frames,
+                            stereo_requested,
+                        );
                         let waveform = audio.as_ref().filter(|_| scope_requested)
-                            .map(|audio| crate::scope::window(&audio.samples, audio.rate));
-                        let spectrum = audio.as_ref().zip(spectrum_requested)
-                            .and_then(|(audio, resolution)| analyzer.levels(&audio.samples, audio.rate, resolution));
+                            .map(|audio| Arc::from(crate::scope::window(&audio.samples, audio.rate)));
+                        let spectrum = audio.as_ref().filter(|_| analyze).zip(spectrum_requested)
+                            .map(|(audio, resolution)| analyzer.levels(&audio.samples, audio.rate, resolution)
+                                .unwrap_or_else(|| crate::spectrum::Levels::silent(resolution)));
                         let format = AudioFormat::from(&snapshot);
+                        let monitor_changed = monitor_mode != previous_monitor_mode;
+                        let refresh_monitor = monitor_changed || (monitor_mode.is_some() && Instant::now() >= next_monitor_poll);
+                        let monitor_signal = if refresh_monitor {
+                            let period = if monitor_mode == Some(crate::live::STEREO_FIELD_MODE) {
+                                crate::live::CAPTURE_INTERVAL
+                            } else {
+                                Duration::from_millis(32)
+                            };
+                            next_monitor_poll = if monitor_changed {
+                                now + period
+                            } else {
+                                (next_monitor_poll + period).max(now + period / 2)
+                            };
+                            previous_monitor_mode = monitor_mode;
+                            #[cfg(windows)]
+                            { audio.as_ref().filter(|_| stereo_requested)
+                                .map(|audio| crate::monitor::Signal::stereo(audio.stereo.clone())) }
+                            #[cfg(target_os = "linux")]
+                            { monitor_mode.and_then(|mode| {
+                                if snapshot.meters.in_peak.max(snapshot.meters.out_peak) <= 0.00001 {
+                                    return None;
+                                }
+                                let frames = if mode == crate::live::BEFORE_AFTER_MODE { 8192 } else { crate::monitor::FIELD_FRAMES as u16 };
+                                let Response::MonitorCapture { rate, frames } = client.send_recv(Command::CaptureMonitor { frames }).ok()? else {
+                                    return None;
+                                };
+                                if frames.is_empty() {
+                                    return None;
+                                }
+                                if mode == crate::live::BEFORE_AFTER_MODE {
+                                    crate::monitor::Signal::comparison(&frames, rate, &mut analyzer)
+                                } else {
+                                    let samples = frames.iter().map(|&[_, _, l, r]| [l, r]).collect();
+                                    Some(crate::monitor::Signal::stereo(samples))
+                                }
+                            }) }
+                            #[cfg(not(any(target_os = "linux", windows)))]
+                            { None::<crate::monitor::Signal> }
+                        } else {
+                            None
+                        };
                         let prepared = {
                             let mut s = state.lock().unwrap();
                             s.clipped |= snapshot.meters.clip || snapshot.meters.out_peak >= 1.0;
@@ -251,19 +320,25 @@ impl Engine {
                             { s.playback_levels = audio.as_ref().and_then(|audio| audio.levels); }
                             s.state = Some(snapshot);
                             s.scope_samples = waveform;
-                            s.spectrum_levels = spectrum;
+                            if analyze {
+                                s.spectrum_levels = spectrum.map(Arc::new);
+                            }
+                            if refresh_monitor {
+                                s.monitor_signal = monitor_signal.map(Arc::new);
+                            }
                             s.prepared_for(&format)
                         };
                         let status = if let Some(cfg) = prepared {
-                            let previous = applied.as_ref().filter(|(on, _)| *on == format).map(|(_, cfg)| cfg);
+                            let previous = applied.as_ref().filter(|(on, _)| *on == format).map(|(_, cfg)| cfg.as_ref());
                             let rate = format.sample_rate.round() as u32;
                             let new_spline = active_spline(&cfg).map(|points| (rate, points));
                             let old_spline = installed_spline.as_ref().map(|(rate, points)| (*rate, points.as_slice()));
-                            let spline_changed = old_spline != new_spline;
-                            let should_wait = spline_changed && old_spline.zip(new_spline)
+                            let requested_spline = new_spline.as_ref().map(|(rate, points)| (*rate, points.as_ref()));
+                            let spline_changed = old_spline != requested_spline;
+                            let should_wait = spline_changed && old_spline.zip(requested_spline)
                                 .is_some_and(|(old, new)| old.0 == new.0)
                                 && last_spline_edit.is_some_and(|last| last.elapsed() < Duration::from_millis(80));
-                            if (previous != Some(&cfg) || spline_changed) && !should_wait {
+                            if (previous.is_none_or(|previous| !std::ptr::eq(previous, cfg.as_ref())) || spline_changed) && !should_wait {
                                 if spline_changed && new_spline.is_none() {
                                     update_spline(&mut client, &spline_path, None, rate)?;
                                 }
@@ -272,10 +347,10 @@ impl Engine {
                                     request(&mut client, command)?;
                                 }
                                 if spline_changed {
-                                    if let Some((rate, points)) = new_spline {
+                                    if let Some((rate, points)) = requested_spline {
                                         update_spline(&mut client, &spline_path, Some(points), rate)?;
                                     }
-                                    installed_spline = new_spline.map(|(rate, points)| (rate, points.to_vec()));
+                                    installed_spline = new_spline.map(|(rate, points)| (rate, points.into_owned()));
                                     last_spline_edit = Some(Instant::now());
                                 }
                                 applied = Some((format, cfg.clone()));
@@ -290,8 +365,8 @@ impl Engine {
                         state.lock().unwrap().status = route_error.as_ref().map_or_else(|| status.into(), |error| format!("Output switch: {error}"));
                         // Keep the cadence across small timer delays and skip missed ticks.
                         let now = Instant::now();
-                        let interval = if scope_requested || meter_capture_requested || spectrum_requested.is_some() {
-                            crate::live::FRAME_INTERVAL
+                        let interval = if scope_requested || meter_capture_requested || monitor_mode == Some(crate::live::STEREO_FIELD_MODE) {
+                            crate::live::CAPTURE_INTERVAL
                         } else {
                             crate::live::CONTROL_INTERVAL
                         };
@@ -302,6 +377,7 @@ impl Engine {
                 if let Err(e) = session {
                     let mut s = state.lock().unwrap(); s.state = None; s.scope_samples = None;
                     s.spectrum_levels = None;
+                    s.monitor_signal = None;
                     s.status = format!("Audio connection: {e}");
                     drop(s); thread::sleep(Duration::from_millis(750));
                 }
@@ -331,7 +407,7 @@ impl Engine {
 
     pub fn submit(&self, format: &AudioFormat, cfg: Config) {
         let mut shared = self.shared.lock().unwrap();
-        shared.prepared = Some((format.clone(), cfg));
+        shared.prepared = Some((format.clone(), Arc::new(cfg)));
     }
 }
 
@@ -364,6 +440,30 @@ mod tests {
         assert_eq!(m.gains[0], 0.5); assert_eq!(m.gains[7], 1.0);
         assert_eq!(m.gains[14], 1.0); assert_eq!(m.gains[1], 0.0);
         cfg.bypass = true; assert_eq!(balance_matrix(2, &cfg).gains, vec![1.0, 0.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn switching_to_spline_keeps_the_live_filters_and_headroom() {
+        let mut before = Config::default();
+        before.bands[2].gain_db = 9.0;
+        before.bands[2].q = 18.0;
+        let mut after = before.clone();
+        after.convert_to_spline(48000.0);
+        let after = Config::from_json(&serde_json::to_string(&after).unwrap()).unwrap();
+        let (before, _) = crate::listening::prepare(&before, None, true, 48000.0, 2);
+        let (mut after, _) = crate::listening::prepare(&after, None, true, 48000.0, 2);
+        assert!(update_plan(Some(&before), &after, 2, 48000.0).unwrap().is_empty());
+        assert!(active_spline(&after).is_none());
+        after.bands[3].gain_db -= 2.0;
+        let (after, _) = crate::listening::prepare(&after, None, true, 48000.0, 2);
+        let mut parametric = after.clone();
+        parametric.convert_to_parametric();
+        let (parametric, _) = crate::listening::prepare(&parametric, None, true, 48000.0, 2);
+        assert!(!parametric.spline);
+        assert!(active_spline(&after).is_some());
+        assert_eq!(active_spline(&parametric), active_spline(&after));
+        assert_eq!(parametric.preamp_db, after.preamp_db);
+        assert!(update_plan(Some(&after), &parametric, 2, 48000.0).unwrap().is_empty());
     }
 
     #[test]
@@ -426,7 +526,7 @@ mod tests {
     fn a_prepared_preset_is_scoped_to_the_output_and_audio_format() {
         let old = AudioFormat { channels: 2, sample_rate: 48000.0, output: Some("USB DAC".into()) };
         let mut state = Shared {
-            prepared: Some((old.clone(), Config::default())),
+            prepared: Some((old.clone(), Arc::new(Config::default()))),
             ..Shared::default()
         };
         let new = AudioFormat { output: Some("Speakers".into()), ..old.clone() };
@@ -434,6 +534,7 @@ mod tests {
         let other_rate = AudioFormat { sample_rate: 96000.0, ..new.clone() };
         assert!(state.prepared_for(&other_rate).is_none());
         let new_cfg = Config { preamp_db: -6.0, ..Config::default() };
+        let new_cfg = Arc::new(new_cfg);
         state.prepared = Some((new.clone(), new_cfg.clone()));
         assert_eq!(state.prepared_for(&new), Some(new_cfg));
         assert!(state.prepared_for(&old).is_none());

@@ -20,7 +20,7 @@ ln -s %{_libexecdir}/%{name}/simple-modern-equalizer %{buildroot}%{_bindir}/simp
 install -Dm644 %{staged_app}/share/applications/%{name}.desktop %{buildroot}%{_datadir}/applications/%{name}.desktop
 install -Dm644 %{staged_app}/share/icons/hicolor/256x256/apps/%{name}.png %{buildroot}%{_datadir}/icons/hicolor/256x256/apps/%{name}.png
 install -Dm644 %{staged_app}/LICENSE %{buildroot}%{_licensedir}/%{name}/LICENSE
-install -Dm644 %{staged_app}/IBM-Plex-Mono-OFL.txt %{buildroot}%{_licensedir}/%{name}/IBM-Plex-Mono-OFL.txt
+install -Dm644 %{staged_app}/Inter-OFL.txt %{buildroot}%{_licensedir}/%{name}/Inter-OFL.txt
 install -Dm644 %{staged_app}/THIRD_PARTY_NOTICES.md %{buildroot}%{_docdir}/%{name}/THIRD_PARTY_NOTICES.md
 
 %check

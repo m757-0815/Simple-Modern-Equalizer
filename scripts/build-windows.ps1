@@ -27,7 +27,7 @@ try {
     Copy-Item -LiteralPath 'vendor/resonance/contrib/windows/install-apo.ps1' -Destination $stage
     Copy-Item -LiteralPath 'vendor/resonance/contrib/windows/uninstall-apo.ps1' -Destination $stage
     Copy-Item -LiteralPath 'LICENSE','THIRD_PARTY_NOTICES.md' -Destination $stage
-    Copy-Item -LiteralPath 'ui/fonts/OFL.txt' -Destination (Join-Path $stage 'IBM-Plex-Mono-OFL.txt')
+    Copy-Item -LiteralPath 'ui/fonts/OFL.txt' -Destination (Join-Path $stage 'Inter-OFL.txt')
     $installer = Join-Path $projectRoot 'dist/SimpleModernEqualizer-Setup-x64.msi'
     $wixArgs = @('build', 'packaging/windows.wxs', '-arch', 'x64', '-ext', $WixExtension,
         '-d', "StageDir=$stage", '-d', "ProductVersion=$version", '-o', $installer)

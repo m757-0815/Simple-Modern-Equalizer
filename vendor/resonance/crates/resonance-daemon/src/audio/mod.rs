@@ -106,6 +106,8 @@ pub struct BackendCtx {
     pub cmd_rx: rtrb::Consumer<AudioCommand>,
     /// RT → IPC: post-DSP mono samples for the spectrum view.
     pub spectrum_tx: rtrb::Producer<f32>,
+    #[cfg(target_os = "linux")]
+    pub monitor: crate::monitor::Tap,
     /// The chain the backend starts with.
     pub initial_chain: ProcessorChain,
     /// RT → IPC: the fed output device's name, on change.

@@ -45,10 +45,10 @@ source from the same release location. Use the exact revision that built it,
 including the modified engine, lockfiles, and build and install scripts. Include
 applicable third-party copyright and license notices with the binaries.
 
-## IBM Plex Mono
+## Inter Light
 
-The graph uses IBM Plex Mono under the SIL Open Font License 1.1.
-Source: https://github.com/google/fonts/tree/main/ofl/ibmplexmono
+The interface uses Inter Light under the SIL Open Font License 1.1.
+Source: https://github.com/rsms/inter/releases/tag/v4.1
 The license is in `ui/fonts/OFL.txt` and ships with packaged builds.
 
 ## Bundled headphone presets

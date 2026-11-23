@@ -3,13 +3,13 @@ set -eu
 cd "$(dirname "$0")/.."
 sh scripts/build-linux.sh
 
-work=$(mktemp -d)
+work=$(mktemp -d "$PWD/dist/.appimage.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 appdir="$work/Simple-Modern-Equalizer.AppDir"
 mkdir -p "$appdir/usr/bin" "$appdir/usr/share/licenses/simple-modern-equalizer"
 cp dist/linux/simple-modern-equalizer dist/linux/resonanced "$appdir/usr/bin/"
 cp -R dist/linux/share/. "$appdir/usr/share/"
-cp dist/linux/LICENSE dist/linux/IBM-Plex-Mono-OFL.txt dist/linux/THIRD_PARTY_NOTICES.md "$appdir/usr/share/licenses/simple-modern-equalizer/"
+cp dist/linux/LICENSE dist/linux/Inter-OFL.txt dist/linux/THIRD_PARTY_NOTICES.md "$appdir/usr/share/licenses/simple-modern-equalizer/"
 cp packaging/simple-modern-equalizer.desktop "$appdir/"
 cp ui/icons/app-icon.png "$appdir/simple-modern-equalizer.png"
 ln -s simple-modern-equalizer.png "$appdir/.DirIcon"
@@ -26,4 +26,6 @@ printf '%s  %s\n' 'ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384
     '2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d' "$work/runtime" | sha256sum --check
 chmod +x "$work/appimagetool"
 (cd "$work" && ./appimagetool --appimage-extract >/dev/null)
-ARCH=x86_64 "$work/squashfs-root/AppRun" --runtime-file "$work/runtime" "$appdir" "$PWD/dist/Simple-Modern-Equalizer-x86_64.AppImage"
+output=Simple-Modern-Equalizer-x86_64.AppImage
+ARCH=x86_64 "$work/squashfs-root/AppRun" --runtime-file "$work/runtime" "$appdir" "$work/$output"
+mv -f "$work/$output" "$PWD/dist/$output"
