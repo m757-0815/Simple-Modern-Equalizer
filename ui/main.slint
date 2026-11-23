@@ -1170,10 +1170,10 @@ export component MainWindow inherits Window {
                 HorizontalLayout {
                     spacing: 12px;
                     cross-axis-alignment: center;
-                    PanelHeading { text: "Equalizer Points"; }
+                    points-heading := PanelHeading { text: root.spline-eq ? "Spline Points" : "EQ Bands"; }
                     Button {
                         text: root.fitting-eq ? "Fitting…" : root.spline-eq ? "Use Parametric" : "Use Spline";
-                        accessible-label: self.text + " From EQ Bands";
+                        accessible-label: self.text + " From " + points-heading.text;
                         enabled: !root.listening-to-a && !root.fitting-eq;
                         Tooltip { text: @markdown("Switch editors and keep the current EQ curve."); }
                         clicked => { root.toggle-eq-mode(); }
