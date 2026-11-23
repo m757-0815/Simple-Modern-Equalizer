@@ -9,6 +9,7 @@ static APO_COPY: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(
     r"(?i)^Copy:\s*L=([+\-\d.e]+)\*L\s+R=([+\-\d.e]+)\*R\s*$"
 ).unwrap());
 
+pub const MANUAL_PREAMP_LIMIT_DB: f64 = 12.0;
 pub const MAX_BANDS: usize = 32;
 pub const MIN_FREQUENCY: f64 = 20.0;
 pub const MAX_FREQUENCY: f64 = 20000.0;
@@ -236,6 +237,7 @@ impl Config {
         let mut cfg: Self = serde_json::from_str(text.trim_start_matches('\u{feff}')).map_err(|e| e.to_string())?;
         cfg.sort_bands();
         cfg.validate()?;
+        cfg.preamp_db = cfg.preamp_db.max(-MANUAL_PREAMP_LIMIT_DB);
         Ok(cfg)
     }
 
@@ -315,6 +317,7 @@ impl Config {
             } else { return Err(err()); }
         }
         cfg.validate()?;
+        cfg.preamp_db = cfg.preamp_db.max(-MANUAL_PREAMP_LIMIT_DB);
         cfg.sort_bands();
         Ok(cfg)
     }
@@ -323,6 +326,16 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn legacy_manual_preamp_loads_at_the_new_lower_limit() {
+        let mut cfg = Config::flat_spline();
+        cfg.preamp_db = -30.0;
+        let loaded = Config::from_json(&serde_json::to_string(&cfg).unwrap()).unwrap();
+        assert_eq!(loaded.preamp_db, -12.0);
+        assert_eq!(loaded.bands, cfg.bands);
+        assert_eq!(Config::from_apo("Preamp: -30 dB").unwrap().preamp_db, -12.0);
+    }
+
     #[test] fn json_roundtrip_and_validation() {
         let cfg = Config::default();
         assert_eq!(Config::from_json(&serde_json::to_string(&cfg).unwrap()).unwrap(), cfg);

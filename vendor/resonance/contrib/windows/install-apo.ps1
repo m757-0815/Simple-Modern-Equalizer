@@ -97,16 +97,8 @@ if ($null -eq (Get-ItemProperty -Path $backupRoot -Name 'DisableProtectedAudioDG
 Set-ItemProperty -Path $audioKey -Name 'DisableProtectedAudioDG' -Value 1 -Type DWord -EA Stop
 
 # --- 4) attach to each render endpoint, ONE slot per endpoint ---
-# CRITICAL: write exactly ONE FX slot. The audio engine instantiates + runs the
-# APO once per populated slot, and our chain is a FULL effects/EQ pipeline — so
-# any two populated slots apply the whole chain TWICE to the same stream (e.g.
-# SFX before the mixer + EFX after it), doubling every gain (+15 dB bass becomes
-# +30 dB → clipping/clicks) and mis-shaping the EQ. (Earlier <=0.5.3 wrote the
-# *pair* SFX+EFX thinking of it as one "mode"; that double-processed.) Pick a
-# single slot by what the driver provides: modern endpoints get EFX(7) — the
-# endpoint/post-mix effect, applied exactly once to the final mix (best for the
-# limiter); a combined/Bluetooth endpoint (no EFX) gets MFX(6); a legacy-only
-# driver gets GFX(2). Every other slot is DELETED (also cleans up old pollution).
+# Register our chain once per endpoint, preserving other audio effects. When the
+# device exposes a composite list, append to that list in processing order.
 $renderSub = 'SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Render'
 $render = "HKLM:\$renderSub"
 $fx   = '{D04E05A6-594B-4FB6-A80D-01AF5EED7D1D}'   # PKEY_FX_*  ,1/,2 legacy  ,5/,6/,7 SFX/MFX/EFX
@@ -121,8 +113,12 @@ $allSlots = '1','2','5','6','7'
 
 $attached = 0
 $verified = 0
+$activeCount = 0
+$activeVerified = 0
 Get-ChildItem $render -EA SilentlyContinue | ForEach-Object {
   $g = $_.PSChildName
+  $active = ($_.GetValue("DeviceState") -band 1) -eq 1
+  if ($active) { $activeCount++ }
   try {
     Grant-Key "$renderSub\$g"
     $fxp = "$render\$g\FxProperties"
@@ -146,37 +142,38 @@ Get-ChildItem $render -EA SilentlyContinue | ForEach-Object {
       }
     }
 
-    # decide the mode from what the driver already provides (EqualizerAPO logic)
-    $cur = Get-ItemProperty -Path $fxp -EA SilentlyContinue
-    $hasLegacy = ($null -ne $cur."$fx,1") -or ($null -ne $cur."$fx,2")
-    $hasModern = ($null -ne $cur."$fx,5") -or ($null -ne $cur."$fx,6") -or ($null -ne $cur."$fx,7")
+    $key = Get-Item -LiteralPath $fxp -EA Stop
     $combined = $null -ne (Get-ItemProperty -Path "$render\$g\Properties" -Name $combinedName -EA SilentlyContinue).$combinedName
-    # Exactly ONE slot (leading comma forces a single-element array so
-    # `-contains` / `[0]` below behave). Two slots would double-process.
-    if ($hasLegacy -and -not $hasModern) { $writeSlots = , '2' }   # GFX (legacy, post-mix)
-    elseif ($combined)                   { $writeSlots = , '6' }   # MFX (combined; EFX N/A)
-    else                                 { $writeSlots = , '7' }   # EFX (endpoint, post-mix)
-
-    foreach ($slot in $allSlots) {
+    $slot = if ($combined) { '6' } else { '7' }
+    $composite = if ($combined) { '14' } else { '15' }
+    $isComposite = $key.GetValueNames() -contains "$fx,$composite"
+    if ($isComposite) {
+      # Keep the device manufacturer's effects in their original order.
+      $name = "$fx,$composite"
+      $effects = @($key.GetValue($name) | Where-Object { $_ -ne $clsid })
+      New-ItemProperty -Force -Path $fxp -Name $name -PropertyType MultiString -Value ([string[]]($effects + $clsid)) -EA Stop | Out-Null
+    } else {
+      $legacy = $key.GetValue("$fx,1") -or $key.GetValue("$fx,2")
+      $modern = $key.GetValue("$fx,5") -or $key.GetValue("$fx,6") -or $key.GetValue("$fx,7")
+      if ($legacy -and -not $modern) { $slot = '2' }
       $name = "$fx,$slot"
-      $mname = "$mode,$slot"
-      if ($writeSlots -contains $slot) {
-        Set-ItemProperty -Path $fxp -Name $name -Value $clsid -EA Stop
-        # processing-mode list is REG_MULTI_SZ (DEFAULT mode)
-        New-ItemProperty -Force -Path $fxp -Name $mname -PropertyType MultiString -Value @($defaultMode) -EA Stop | Out-Null
-      } else {
-        if ($null -ne (Get-ItemProperty -Path $fxp -Name $name -EA SilentlyContinue).$name) {
-          Remove-ItemProperty -Path $fxp -Name $name -EA Stop
-        }
-        if ($null -ne (Get-ItemProperty -Path $fxp -Name $mname -EA SilentlyContinue).$mname) {
-          Remove-ItemProperty -Path $fxp -Name $mname -EA Stop
-        }
+      Set-ItemProperty -Path $fxp -Name $name -Value $clsid -EA Stop
+    }
+    foreach ($old in $allSlots) {
+      if ("$fx,$old" -ne $name -and $key.GetValue("$fx,$old") -eq $clsid) {
+        Remove-ItemProperty -Path $fxp -Name "$fx,$old" -EA Stop
+      }
+    }
+    if ($slot -ne '2') {
+      $modes = @($key.GetValue("$mode,$slot") | Where-Object { $_ })
+      if ($modes -notcontains $defaultMode) {
+        New-ItemProperty -Force -Path $fxp -Name "$mode,$slot" -PropertyType MultiString -Value ([string[]]($modes + $defaultMode)) -EA Stop | Out-Null
       }
     }
     $attached++
-    $rb = (Get-ItemProperty -Path $fxp -Name "$fx,$($writeSlots[0])" -EA SilentlyContinue)."$fx,$($writeSlots[0])"
-    if ($rb -eq $clsid) { $verified++; Write-Output "attached+verified $g mode=$($writeSlots -join '+')" }
-    else { Write-Output "attached but READ-BACK MISMATCH $g (mode=$($writeSlots -join '+') got '$rb') - endpoint may be vendor-locked" }
+    $rb = (Get-Item -LiteralPath $fxp -EA Stop).GetValue($name)
+    if (@($rb) -contains $clsid) { if ($active) { $activeVerified++ }; $verified++; Write-Output "attached+verified $g property=$name" }
+    else { Write-Output "attach read-back mismatch $g property=$name" }
   } catch {
     Write-Output "attach FAILED $g : $($_.Exception.Message)"
   }
@@ -189,4 +186,8 @@ if ($verified -eq 0) {
 # --- 5) restart the audio engine so audiodg reloads APO registrations ---
 Restart-Service audiosrv -Force -EA SilentlyContinue
 Write-Output 'Resonance APO install finished.'
+if ($activeCount -gt 0 -and $activeVerified -eq 0) {
+  Write-Output "ERROR: registration failed on every active playback device."
+}
 try { Stop-Transcript | Out-Null } catch {}
+if ($verified -eq 0 -or ($activeCount -gt 0 -and $activeVerified -eq 0)) { exit 1 }

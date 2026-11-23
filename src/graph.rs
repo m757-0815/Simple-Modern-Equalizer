@@ -19,9 +19,6 @@ impl Default for GainAxis {
 }
 
 impl GainAxis {
-    // Includes the full point-gain range at every supported manual preamp.
-    const SPLINE: Self = Self { bottom: -84.0, top: 36.0 };
-
     pub fn span(self) -> f64 { self.top - self.bottom }
 
     pub fn y(self, gain: f64) -> f64 { ((self.top - gain) / self.span()).clamp(0.0, 1.0) }
@@ -110,7 +107,7 @@ pub fn hit_band(dots: &[Dot], x: f64, y: f64, width: f64, height: f64) -> Option
         return None;
     }
     dots.iter().enumerate().rev().filter_map(|(index, dot)| {
-        let distance = ((x - dot.x) * width).hypot((y - dot.y) * height);
+        let distance = ((x - dot.x) * width).hypot((y - dot.y.clamp(0.0, 1.0)) * height);
         (distance <= 13.0).then_some((index, distance))
     }).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(index, _)| index)
 }
@@ -120,9 +117,6 @@ pub struct GraphCache {
     bands: Vec<Band>,
     bypass: bool,
     spline: bool,
-    preamp_db: f64,
-    requested_preamp: Option<f64>,
-    plotted_preamp: f64,
     output_offset: f64,
     sample_rate: f64,
     pub axis: GainAxis,
@@ -141,10 +135,6 @@ impl GraphCache {
         }
     }
 
-    pub fn set_requested_preamp(&mut self, preamp: f64) {
-        self.requested_preamp = Some(preamp);
-    }
-
     pub fn output_bounds(&self) -> (f64, f64) {
         (self.axis.bottom + self.output_offset, self.axis.top + self.output_offset)
     }
@@ -153,22 +143,13 @@ impl GraphCache {
         (self.axis.top + self.output_offset) / self.axis.span()
     }
 
-    pub fn band_values_at(&self, x: f64, y: f64) -> (f64, f64) {
-        let (frequency, gain) = band_values(x, y);
-        if self.spline {
-            (frequency, rounded_gain(self.axis.top - y.clamp(0.0, 1.0) * self.axis.span() - self.plotted_preamp))
-        } else {
-            (frequency, gain)
-        }
-    }
-
     pub fn update_dots(&mut self, cfg: &Config) -> bool {
         if self.sample_rate == 0.0 {
             return false;
         }
         let dots: Vec<_> = cfg.bands.iter().filter(|_| cfg.spline).map(|band| {
             let (x, _) = position(band.frequency_hz, band.gain_db);
-            let y = self.axis.y(band.gain_db + self.plotted_preamp);
+            let y = (self.axis.top - band.gain_db) / self.axis.span();
             Dot { x, y, enabled: !cfg.bypass }
         }).collect();
         if self.dots == dots {
@@ -181,17 +162,11 @@ impl GraphCache {
     pub fn frame(&mut self, cfg: &Config, spectrum: &[f32], sample_rate: f64, size: RasterSize) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
         let rate = if sample_rate.is_finite() && sample_rate > 0.0 { sample_rate } else { 48000.0 };
         let preamp = if cfg.bypass { 0.0 } else { cfg.preamp_db };
-        let plotted_preamp = if cfg.spline { self.requested_preamp.unwrap_or(cfg.preamp_db) } else { preamp };
-        // Automatic attenuation changes the output scale. A point edit must
-        // never move its neighbors, even when it changes Auto Headroom.
-        let output_offset = if cfg.spline && !cfg.bypass { preamp - plotted_preamp } else { 0.0 };
-        let changed = self.sample_rate == 0.0 || self.bypass != cfg.bypass || self.spline != cfg.spline || self.bands != cfg.bands ||
-            self.plotted_preamp != plotted_preamp || self.output_offset != output_offset ||
-            (!cfg.bypass && (self.preamp_db != cfg.preamp_db || self.sample_rate != rate));
+        // Keep EQ geometry in band-gain coordinates; the scale includes effective preamp.
+        let changed = self.sample_rate == 0.0 || self.bypass != cfg.bypass || self.spline != cfg.spline ||
+            self.bands != cfg.bands || self.output_offset != preamp || (!cfg.bypass && self.sample_rate != rate);
         if changed {
-            self.axis = if cfg.spline { GainAxis::SPLINE } else { GainAxis::default() };
-            self.plotted_preamp = plotted_preamp;
-            self.output_offset = output_offset;
+            self.output_offset = preamp;
             let levels = if cfg.spline {
                 Vec::new()
             } else if cfg.bypass {
@@ -201,13 +176,12 @@ impl GraphCache {
                 cfg.response(frequencies, rate)
             };
             self.curve = levels.into_iter().map(|db| {
-                let y = self.axis.y(db + preamp);
+                let y = self.axis.y(db);
                 (y * (H - 1) as f64) as f32
             }).collect();
             self.bands.clone_from(&cfg.bands);
             self.bypass = cfg.bypass;
             self.spline = cfg.spline;
-            self.preamp_db = cfg.preamp_db;
             self.sample_rate = rate;
         }
         let visible = if spectrum.iter().any(|&level| level > 0.0) { spectrum } else { &[] };
@@ -218,7 +192,7 @@ impl GraphCache {
         self.rendered_spectrum.extend_from_slice(visible);
         self.rendered_size = Some(size);
         let path = if cfg.spline {
-            band_spline(&self.bands, self.axis, self.plotted_preamp)
+            band_spline(&self.bands, self.axis)
         } else {
             response_path(&self.curve)
         };
@@ -226,10 +200,11 @@ impl GraphCache {
     }
 }
 
-fn band_spline(bands: &[Band], axis: GainAxis, preamp: f64) -> Option<Path> {
+fn band_spline(bands: &[Band], axis: GainAxis) -> Option<Path> {
     let mut points = bands.iter().map(|band| {
         let (x, _) = position(band.frequency_hz, band.gain_db);
-        let y = axis.y(band.gain_db + preamp);
+        // Clip the finished curve at the viewport, preserving its shape near the edges.
+        let y = (axis.top - band.gain_db) / axis.span();
         ((x * W as f64) as f32, (y * H as f64) as f32)
     });
     let (mut x, mut y) = points.next()?;
@@ -377,7 +352,8 @@ mod tests {
         assert!(cache.frame(&cfg, &[0.2; 16], 48000.0, TEST_SIZE).is_none());
         cfg.preamp_db = -3.0;
         assert!(cache.frame(&cfg, &[], 48000.0, TEST_SIZE).is_some());
-        assert_ne!(cache.curve, curve);
+        assert_eq!(cache.curve, curve);
+        assert_eq!(cache.output_bounds(), (-27.0, 21.0));
         cfg.bypass = true;
         assert!(cache.frame(&cfg, &[], 48000.0, TEST_SIZE).is_some());
         assert_eq!(cache.curve, curve);
@@ -419,10 +395,10 @@ mod tests {
     fn spline_hits_every_dot_and_only_changes_near_the_moved_point() {
         let mut cfg = Config::default();
         let axis = GainAxis::default();
-        let original = band_spline(&cfg.bands, axis, 0.0).unwrap();
+        let original = band_spline(&cfg.bands, axis).unwrap();
         let mut drag = BandDrag::new(1, &cfg.bands[1]);
         assert!(drag.update(&mut cfg, 0.012, -0.15));
-        let moved = band_spline(&cfg.bands, axis, 0.0).unwrap();
+        let moved = band_spline(&cfg.bands, axis).unwrap();
         assert_ne!(&original.points()[..7], &moved.points()[..7]);
         assert_eq!(&original.points()[6..], &moved.points()[6..]);
         for (index, band) in cfg.bands.iter().enumerate() {
@@ -434,34 +410,26 @@ mod tests {
     }
 
     #[test]
-    fn preamp_shifts_the_single_spline_and_its_dots_together() {
+    fn manual_preamp_moves_the_scale_and_keeps_all_spline_points_visible() {
         let mut cfg = Config::flat_spline();
+        cfg.bands[0].gain_db = -24.0;
+        cfg.bands[1].gain_db = 24.0;
         assert!(cfg.add_peak(1000.0, 6.0));
         let mut cache = GraphCache::default();
         cache.frame(&cfg, &[], 48000.0, TEST_SIZE).unwrap();
-        assert!(cache.update_dots(&cfg));
+        cache.update_dots(&cfg);
         let original = cache.dots.clone();
-        cfg.preamp_db = -6.0;
-        cache.frame(&cfg, &[], 48000.0, TEST_SIZE).unwrap();
-        assert!(cache.update_dots(&cfg));
-        for (before, after) in original.iter().zip(&cache.dots) {
-            assert_eq!(before.x, after.x);
-            assert!((after.y - before.y - 6.0 / cache.axis.span()).abs() < 1e-12);
+        for preamp in [-12.0, 12.0, 0.0] {
+            cfg.preamp_db = preamp;
+            cache.frame(&cfg, &[], 48000.0, TEST_SIZE).unwrap();
+            assert!(!cache.update_dots(&cfg));
+            assert_eq!(cache.dots, original);
+            assert_eq!(cache.output_bounds(), (preamp - 24.0, preamp + 24.0));
+            assert_eq!(cache.zero_position(), (24.0 + preamp) / 48.0);
+            for (dot, band) in cache.dots.iter().zip(&cfg.bands) {
+                assert_eq!(band_values(dot.x, dot.y), (band.frequency_hz, band.gain_db));
+            }
         }
-        let (_, gain) = cache.band_values_at(cache.dots[1].x, cache.dots[1].y);
-        assert_eq!(gain, 6.0);
-        // A horizontal flat spline with preamp occupies only its shifted row.
-        cfg.bands[1].gain_db = 0.0;
-        let image = cache.frame(&cfg, &[], 48000.0, TEST_SIZE).unwrap();
-        let pixel = |y: usize| {
-            let offset = (y * W + 19) * 4;
-            &image.as_bytes()[offset..offset + 3]
-        };
-        let shifted_row = (cache.axis.y(-6.0) * H as f64).floor() as usize;
-        assert_eq!(pixel(shifted_row), cache.colors.graph);
-        let unshifted_row = (cache.axis.y(0.0) * H as f64).floor() as usize;
-        assert_ne!(pixel(unshifted_row), cache.colors.graph);
-        assert!(cache.frame(&cfg, &[], 48000.0, TEST_SIZE).is_none());
     }
 
     #[test]
@@ -472,7 +440,6 @@ mod tests {
         let mut cache = GraphCache::default();
         let mut draw = |cfg: &Config| {
             let (effective, _) = crate::listening::prepare(cfg, None, true, 48000.0, 2);
-            cache.set_requested_preamp(cfg.preamp_db);
             cache.frame(&effective, &[], 48000.0, TEST_SIZE);
             cache.update_dots(&effective);
             (cache.dots.clone(), cache.output_bounds(), effective)

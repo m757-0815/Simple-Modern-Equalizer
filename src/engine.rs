@@ -27,6 +27,8 @@ pub struct Shared {
     pub status: String,
     pub clipped: bool,
     pub scope_requested: bool,
+    pub meter_capture_requested: bool,
+    pub playback_levels: Option<([f32; 2], f32)>,
     pub scope_samples: Option<Vec<f32>>,
     pub spectrum_requested: Option<crate::spectrum::Resolution>,
     pub spectrum_levels: Option<crate::spectrum::Levels>,
@@ -232,11 +234,11 @@ impl Engine {
                             }
                         }
                         let snapshot = client.get_state().map_err(|e| e.to_string())?;
-                        let (scope_requested, spectrum_requested) = {
+                        let (scope_requested, spectrum_requested, meter_capture_requested) = {
                             let shared = state.lock().unwrap();
-                            (shared.scope_requested, shared.spectrum_requested)
+                            (shared.scope_requested, shared.spectrum_requested, shared.meter_capture_requested)
                         };
-                        let audio = capture.read(&mut client, &snapshot, scope_requested || spectrum_requested.is_some());
+                        let audio = capture.read(&mut client, &snapshot, scope_requested || meter_capture_requested || spectrum_requested.is_some());
                         let waveform = audio.as_ref().filter(|_| scope_requested)
                             .map(|audio| crate::scope::window(&audio.samples, audio.rate));
                         let spectrum = audio.as_ref().zip(spectrum_requested)
@@ -245,6 +247,8 @@ impl Engine {
                         let prepared = {
                             let mut s = state.lock().unwrap();
                             s.clipped |= snapshot.meters.clip || snapshot.meters.out_peak >= 1.0;
+                            #[cfg(windows)]
+                            { s.playback_levels = audio.as_ref().and_then(|audio| audio.levels); }
                             s.state = Some(snapshot);
                             s.scope_samples = waveform;
                             s.spectrum_levels = spectrum;
@@ -286,7 +290,7 @@ impl Engine {
                         state.lock().unwrap().status = route_error.as_ref().map_or_else(|| status.into(), |error| format!("Output switch: {error}"));
                         // Keep the cadence across small timer delays and skip missed ticks.
                         let now = Instant::now();
-                        let interval = if scope_requested || spectrum_requested.is_some() {
+                        let interval = if scope_requested || meter_capture_requested || spectrum_requested.is_some() {
                             crate::live::FRAME_INTERVAL
                         } else {
                             crate::live::CONTROL_INTERVAL

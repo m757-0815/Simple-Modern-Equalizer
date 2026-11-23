@@ -6,6 +6,8 @@ const CAPTURE_FRAMES: u32 = 8192;
 pub struct Audio {
     pub samples: Vec<f32>,
     pub rate: f64,
+    #[cfg(windows)]
+    pub levels: Option<([f32; 2], f32)>,
 }
 
 /// Show 20 ms, using a nearby rising zero crossing when one fits in the history.
@@ -91,7 +93,7 @@ mod windows {
                 self.retry_after = Some(Instant::now() + Duration::from_secs(1));
                 self.loopback = Loopback::start();
             }
-            self.loopback.as_ref().map(|capture| Audio { samples: capture.samples(), rate: capture.rate })
+            self.loopback.as_ref().map(Loopback::audio)
         }
     }
 
@@ -105,6 +107,7 @@ mod windows {
     struct Buffer {
         samples: VecDeque<f32>,
         updated: Option<Instant>,
+        levels: ([f32; 2], f32),
     }
 
     impl Loopback {
@@ -118,6 +121,7 @@ mod windows {
             let buffer = Arc::new(Mutex::new(Buffer {
                 samples: VecDeque::with_capacity(CAPTURE_FRAMES as usize),
                 updated: None,
+                levels: ([0.0; 2], 0.0),
             }));
             let failed = Arc::new(AtomicBool::new(false));
             let stream = match format.sample_format() {
@@ -131,13 +135,13 @@ mod windows {
             Some(Self { _stream: stream, rate: f64::from(config.sample_rate), buffer, failed })
         }
 
-        fn samples(&self) -> Vec<f32> {
+        fn audio(&self) -> Audio {
             let mut buffer = self.buffer.lock().unwrap();
             if buffer.updated.is_none_or(|updated| updated.elapsed() >= Duration::from_millis(150)) {
                 buffer.samples.clear();
-                return Vec::new();
+                return Audio { samples: Vec::new(), rate: self.rate, levels: None };
             }
-            buffer.samples.iter().copied().collect()
+            Audio { samples: buffer.samples.iter().copied().collect(), rate: self.rate, levels: Some(buffer.levels) }
         }
     }
 
@@ -158,13 +162,26 @@ mod windows {
             config,
             move |samples: &[T], _| {
                 if let Ok(mut buffer) = buffer.try_lock() {
+                    if samples.len() < channels { return; }
+                    let mut squares = [0.0; 2];
+                    let mut peak = 0.0_f32;
                     for frame in samples.chunks_exact(channels) {
-                        let sum = frame.iter().map(|&sample| f32::from_sample(sample)).sum::<f32>();
+                        let left = f32::from_sample(frame[0]);
+                        let right = f32::from_sample(frame[if channels > 1 { 1 } else { 0 }]);
+                        squares[0] += left * left;
+                        squares[1] += right * right;
+                        let sum = frame.iter().map(|&sample| {
+                            let value = f32::from_sample(sample);
+                            peak = peak.max(value.abs());
+                            value
+                        }).sum::<f32>();
                         if buffer.samples.len() == CAPTURE_FRAMES as usize {
                             buffer.samples.pop_front();
                         }
                         buffer.samples.push_back(sum / channels as f32);
                     }
+                    let frames = (samples.len() / channels) as f32;
+                    buffer.levels = (squares.map(|s| (s / frames).sqrt()), peak);
                     buffer.updated = Some(Instant::now());
                 }
             },

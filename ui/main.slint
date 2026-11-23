@@ -14,16 +14,12 @@ global Graphite {
 }
 
 export global Appearance {
+    pure callback parse-color(string, color) -> color;
+    pure callback format-color(color) -> string;
     in-out property <color> graph-accent: #77D9BD;
     in-out property <color> accent-text: #77D9BD;
     in-out property <string> graph-hex: "#77D9BD";
     in-out property <string> text-hex: "#77D9BD";
-}
-
-struct PaletteColor {
-    name: string,
-    hex: string,
-    swatch: color,
 }
 
 component ColorSwatch inherits Rectangle {
@@ -51,14 +47,26 @@ component ColorField inherits VerticalLayout {
     in property <color> swatch;
     in-out property <string> value <=> input.text;
     callback accepted();
-    callback pick();
+    private property <float> hue;
+    private property <float> saturation;
+    private property <float> brightness;
+    private property <int> tab: 1;
+    private property <color> selection: rgb(0,0,0);
+    function load(c: color) {
+        let hsv = c.to-hsv();
+        root.hue = hsv.hue;
+        root.saturation = hsv.saturation;
+        root.brightness = hsv.value;
+        root.selection = c;
+    }
+    function update() {
+        root.selection = hsv(root.hue, root.saturation, root.brightness);
+        root.pending-color = root.selection;
+        root.pending-hex = Appearance.format-color(root.selection);
+        root.value = root.pending-hex;
+    }
     private property <string> pending-hex;
     private property <color> pending-color;
-    public function choose(shade: PaletteColor) {
-        self.pending-hex = shade.hex;
-        self.pending-color = shade.swatch;
-        self.value = shade.hex;
-    }
     min-width: 0px;
     horizontal-stretch: 1;
     spacing: 4px;
@@ -67,8 +75,8 @@ component ColorField inherits VerticalLayout {
         ColorSwatch {
             label: root.label + " color picker";
             swatch: root.pending-hex == root.value && root.value != "" ? root.pending-color : root.swatch;
-            clicked => { root.pick(); }
-            hint: "Choose a color from the palette.";
+            clicked => { root.load(Appearance.parse-color(root.value, root.swatch)); picker.show(); }
+            hint: "Choose a color from the wheel.";
         }
         Text { text: root.label; color: Graphite.secondary; font-size: 12px; vertical-alignment: center; }
     }
@@ -78,6 +86,85 @@ component ColorField inherits VerticalLayout {
         placeholder-text: "#RRGGBB";
         accepted => { root.accepted(); }
         Tooltip { text: @markdown("Enter a six-digit hex color, for example `#77D9BD`."); }
+    }
+    picker := PopupWindow {
+        width: 222px; height: 295px;
+        x: 0px; y: 26px;
+        close-policy: close-on-click-outside;
+        Rectangle {
+            background: Graphite.plot; border-radius: 6px;
+            border-width: 1px; border-color: Graphite.border;
+            VerticalLayout {
+                padding: 9px; spacing: 5px;
+                HorizontalLayout {
+                    height: 168px; spacing: 8px;
+                    wheel := Rectangle {
+                        width: 168px; height: 168px;
+                        Image { width: 100%; height: 100%; source: @image-url("icons/color-wheel.png"); }
+                        Rectangle { border-radius: 84px; background: black; opacity: 1 - root.brightness; }
+                        Rectangle {
+                            width: 8px; height: 8px; border-radius: 4px;
+                            x: 80px - 84px * root.saturation * sin(root.hue * 1deg);
+                            y: 80px + 84px * root.saturation * cos(root.hue * 1deg);
+                            border-width: 1px; border-color: black; background: white;
+                        }
+                        TouchArea {
+                            accessible-role: slider; accessible-label: "Hue and saturation wheel";
+                            function select-point() {
+                                let dx = (self.mouse-x - 84px) / 84px;
+                                let dy = (self.mouse-y - 84px) / 84px;
+                                root.hue = mod(360 - atan2(dx, dy) / 1deg, 360);
+                                root.saturation = min(1, sqrt(dx*dx + dy*dy));
+                                root.update();
+                            }
+                            pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) { self.select-point(); } }
+                            moved => { if (self.pressed) { self.select-point(); } }
+                        }
+                    }
+                    Rectangle {
+                        width: 20px; height: 168px; border-radius: 3px;
+                        background: @linear-gradient(180deg, white, black);
+                        Rectangle { y: (parent.height - 3px) * (1-root.brightness); height: 3px; border-width: 1px; border-color: black; background: white; }
+                        TouchArea {
+                            function adjust() { root.brightness = clamp(1-self.mouse-y/self.height,0,1); root.update(); }
+                            pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) { self.adjust(); } }
+                            moved => { if (self.pressed) { self.adjust(); } }
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    height: 25px;
+                    for title[i] in ["RGB", "HSV", "Hex"]: Button {
+                        text: title; primary: root.tab == i; clicked => { root.tab = i; }
+                    }
+                }
+                if root.tab != 2: VerticalLayout {
+                    for channel[i] in (root.tab == 1 ? ["H","S","V"] : ["R","G","B"]): HorizontalLayout {
+                        Text { text: channel; color: Graphite.text; width: 16px; }
+                        adjuster := Slider {
+                            accessible-label: channel;
+                            minimum: 0; maximum: root.tab == 0 ? 255 : i == 0 ? 360 : 100;
+                            value: root.tab == 0 ? (i == 0 ? root.selection.red : i == 1 ? root.selection.green : root.selection.blue)
+                                : (i == 0 ? root.hue : 100*(i == 1 ? root.saturation : root.brightness));
+                            changed(v) => {
+                                if (root.tab == 0) {
+                                    root.load(rgb(i == 0 ? round(v) : root.selection.red, i == 1 ? round(v) : root.selection.green, i == 2 ? round(v) : root.selection.blue));
+                                } else if (i == 0) { root.hue = v; }
+                                else if (i == 1) { root.saturation = v/100; }
+                                else { root.brightness = v/100; }
+                                root.update();
+                            }
+                        }
+                        Text { width: 32px; color: Graphite.secondary; horizontal-alignment: right; text: round(adjuster.value); }
+                    }
+                }
+                if root.tab == 2: LineEdit {
+                    accessible-label: "Picker hex"; text <=> root.value;
+                    edited => { root.load(Appearance.parse-color(self.text,root.selection)); root.pending-color = root.selection; root.pending-hex = self.text; }
+                }
+                Button { height: 25px; text: "Done"; clicked => { picker.close(); } }
+            }
+        }
     }
 }
 
@@ -417,7 +504,6 @@ export component MainWindow inherits Window {
     in-out property <string> preamp-entry;
     in property <string> balance-label;
     in property <string> config-name;
-    private property <int> color-picker-target;
     in property <string> status: "Starting audio engine…";
     in property <string> notice;
     in property <bool> connected: false;
@@ -519,6 +605,8 @@ export component MainWindow inherits Window {
         padding: 26px;
         spacing: 12px;
         HorizontalLayout {
+            // Keep navigation compact when the restored window has spare height.
+            height: 32px;
             spacing: 6px;
             Button {
                 text: "Simple"; min-width: 86px; primary: root.simple-layout;
@@ -534,7 +622,7 @@ export component MainWindow inherits Window {
             settings-button := Button {
                 text: "Settings";
                 Tooltip { text: @markdown("Choose what to display and configure playback."); }
-                clicked => { root.color-picker-target = 0; settings.show(); }
+                clicked => { settings.show(); }
             }
         }
         HorizontalLayout {
@@ -855,7 +943,7 @@ export component MainWindow inherits Window {
                         for dot[index] in root.graph-dots: Rectangle {
                             width: 20px; height: 20px; border-radius: 10px;
                             x: dot.x * parent.width - self.width / 2;
-                            y: dot.y * parent.height - self.height / 2;
+                            y: clamp(dot.y, 0, 1) * parent.height - self.height / 2;
                             border-width: 1px;
                             border-color: dot.enabled ? Appearance.graph-accent : #86868E;
                             background: !dot.enabled ? #414148 : plot.active-drag == index ? Appearance.graph-accent : #343B39;
@@ -993,7 +1081,7 @@ export component MainWindow inherits Window {
                         spacing: 8px;
                         Slider {
                             enabled: !root.auto-headroom && !root.listening-to-a;
-                            minimum: -60; maximum: 12; step: 0.05; value <=> root.preamp;
+                            minimum: -12; maximum: 12; step: 0.05; value <=> root.preamp;
                             accessible-label: "Preamp";
                             changed(value) => { root.change-preamp(value); }
                             Tooltip { text: @markdown("Adjust the gain applied before the EQ filters."); }
@@ -1106,7 +1194,7 @@ export component MainWindow inherits Window {
     }
     settings := PopupWindow {
         width: 420px;
-        height: (root.color-picker-target == 0 ? 368px : 406px) + (root.simple-layout ? 0px : 34px);
+        height: 368px + (root.simple-layout ? 0px : 34px);
         x: settings-button.absolute-position.x + settings-button.width - self.width;
         y: settings-button.absolute-position.y + settings-button.height + 8px;
         close-policy: close-on-click-outside;
@@ -1120,7 +1208,6 @@ export component MainWindow inherits Window {
                 function submit(graph: string, text: string) {
                     self.color-error = root.change-colors(graph, text);
                     if (self.color-error == "") {
-                        root.color-picker-target = 0;
                         graph-color.value = Appearance.graph-hex;
                         text-color.value = Appearance.text-hex;
                     }
@@ -1190,38 +1277,10 @@ export component MainWindow inherits Window {
                     graph-color := ColorField {
                         label: "Graphs"; swatch: Appearance.graph-accent; value: Appearance.graph-hex;
                         accepted => { colors-form.apply(); }
-                        pick => { root.color-picker-target = root.color-picker-target == 1 ? 0 : 1; }
                     }
                     text-color := ColorField {
                         label: "Accent text"; swatch: Appearance.accent-text; value: Appearance.text-hex;
                         accepted => { colors-form.apply(); }
-                        pick => { root.color-picker-target = root.color-picker-target == 2 ? 0 : 2; }
-                    }
-                }
-                if root.color-picker-target != 0: HorizontalLayout {
-                    spacing: 4px;
-                    for shade in [
-                        { name: "Mint", hex: "#77D9BD", swatch: #77D9BD },
-                        { name: "Teal", hex: "#31C9CC", swatch: #31C9CC },
-                        { name: "Sky", hex: "#7ECBF8", swatch: #7ECBF8 },
-                        { name: "Blue", hex: "#78A6FF", swatch: #78A6FF },
-                        { name: "Lavender", hex: "#B8A0FF", swatch: #B8A0FF },
-                        { name: "Rose", hex: "#F2A0C4", swatch: #F2A0C4 },
-                        { name: "Coral", hex: "#FF9B89", swatch: #FF9B89 },
-                        { name: "Amber", hex: "#FFBD72", swatch: #FFBD72 },
-                        { name: "Gold", hex: "#EAD67B", swatch: #EAD67B },
-                        { name: "Lime", hex: "#B5D984", swatch: #B5D984 },
-                        { name: "Silver", hex: "#BBC6D2", swatch: #BBC6D2 },
-                        { name: "White", hex: "#F2F2F4", swatch: #F2F2F4 },
-                    ]: ColorSwatch {
-                        label: shade.name;
-                        swatch: shade.swatch;
-                        hint: shade.name;
-                        clicked => {
-                            if (root.color-picker-target == 1) { graph-color.choose(shade); }
-                            else { text-color.choose(shade); }
-                            root.color-picker-target = 0;
-                        }
                     }
                 }
                 if colors-form.color-error != "": Label {

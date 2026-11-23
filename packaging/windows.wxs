@@ -74,7 +74,7 @@
                   Execute="deferred" Impersonate="no" Return="check" />
     <InstallExecuteSequence>
       <Custom Action="RollbackApo" After="InstallFiles" Condition="NOT Installed" />
-      <Custom Action="RegisterApo" After="RollbackApo" Condition="NOT Installed" />
+      <Custom Action="RegisterApo" After="RollbackApo" Condition='NOT Installed OR (REINSTALL AND NOT REMOVE~="ALL")' />
       <Custom Action="RemoveApo" Before="RemoveFiles" Condition='REMOVE~="ALL"' />
     </InstallExecuteSequence>
   </Package>

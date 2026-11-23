@@ -47,6 +47,15 @@ if (Test-Path $backupRoot) {
     $fxp = "$render\$g\FxProperties"
     if (-not (Test-Path $fxp)) { return }
     try {
+      $live = Get-Item -LiteralPath $fxp -EA Stop
+      foreach ($index in '14','15') {
+        $name = "$fx,$index"
+        $effects = @($live.GetValue($name))
+        if ($effects -contains $clsid) {
+          $remaining = [string[]]@($effects | Where-Object { $_ -ne $clsid })
+          New-ItemProperty -Force -Path $fxp -Name $name -PropertyType MultiString -Value $remaining -EA Stop | Out-Null
+        }
+      }
       $names = $backup.GetValueNames()
       foreach ($slot in '1','2','5','6','7') {
         foreach ($name in @("$fx,$slot", "$mode,$slot")) {

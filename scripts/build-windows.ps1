@@ -25,7 +25,6 @@ try {
     Copy-Item -LiteralPath 'vendor/resonance/target/release/resonanced.exe' -Destination $stage
     Copy-Item -LiteralPath 'vendor/resonance/target/apo/resonance_apo.dll' -Destination $stage
     Copy-Item -LiteralPath 'vendor/resonance/contrib/windows/install-apo.ps1' -Destination $stage
-    Add-Content -LiteralPath (Join-Path $stage 'install-apo.ps1') -Value 'if ($verified -eq 0) { exit 1 }'
     Copy-Item -LiteralPath 'vendor/resonance/contrib/windows/uninstall-apo.ps1' -Destination $stage
     Copy-Item -LiteralPath 'LICENSE','THIRD_PARTY_NOTICES.md' -Destination $stage
     Copy-Item -LiteralPath 'ui/fonts/OFL.txt' -Destination (Join-Path $stage 'IBM-Plex-Mono-OFL.txt')

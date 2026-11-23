@@ -171,8 +171,6 @@ fn draw_eq_graph(ui: &MainWindow, app: &mut App) {
     let rate = app.format.as_ref().map_or(48000.0, |format| format.sample_rate);
     let overlay = if ui.get_show_eq_spectrum() { &app.plot_spectrum[..] } else { &[] };
     app.plot.set_colors(app.preferences.colors);
-    let requested = if app.listening_to_a { app.reference.as_ref().unwrap_or(&app.cfg) } else { &app.cfg };
-    app.plot.set_requested_preamp(requested.preamp_db);
     if let Some(frame) = app.plot.frame(&app.effective, overlay, rate, size) {
         ui.set_graph(slint::Image::from_rgba8(frame));
         let (bottom, top) = app.plot.output_bounds();
@@ -266,7 +264,7 @@ fn set_manual_preamp(ui: &MainWindow, app: &mut App, value: f64) {
         return;
     }
     let mut config = app.cfg.clone();
-    config.preamp_db = (value.clamp(-60.0, 12.0) * 20.0).round() / 20.0;
+    config.preamp_db = (value.clamp(-config::MANUAL_PREAMP_LIMIT_DB, config::MANUAL_PREAMP_LIMIT_DB) * 20.0).round() / 20.0;
     commit(ui, app, config);
     refresh_preamp(ui, app, &app.cfg);
 }
@@ -328,6 +326,17 @@ fn read_config(path: &Path) -> Result<Config, String> {
     Ok(cfg)
 }
 
+fn configure_color_picker(ui: &MainWindow) {
+    let appearance = ui.global::<Appearance>();
+    appearance.on_format_color(|c| theme::ThemeColors::hex([c.red(), c.green(), c.blue()]).into());
+    appearance.on_parse_color(|text, fallback| {
+        theme::ThemeColors::parse(&text, &text).map_or(fallback, |colors| {
+            let [r, g, b] = colors.graph;
+            slint::Color::from_rgb_u8(r, g, b)
+        })
+    });
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let directory = data_directory();
     fs::create_dir_all(directory.join("presets"))?;
@@ -371,7 +380,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     let edited = selected.is_none() && presets.iter().any(|preset| preset.config.name == cfg.name);
     let preferences: Preferences = storage::read_text(&directory.join("preferences.json")).ok()
-        .and_then(|text| serde_json::from_str(&text).ok()).unwrap_or_default();
+        .and_then(|text| serde_json::from_str(text.trim_start_matches('\u{feff}')).ok()).unwrap_or_default();
     let simple: simple::SimpleSettings = storage::read_text(&directory.join("simple.json")).ok()
         .and_then(|text| serde_json::from_str(text.trim_start_matches('\u{feff}')).ok()).unwrap_or_default();
     let initial = if simple.active { simple.config(cfg.bypass, preferences.simple_auto_headroom) } else {
@@ -383,6 +392,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         outputs: vec![], directory, edited, plot: graph::GraphCache::default(), drag_origin: None,
         pending_band_removal: None, plot_spectrum: vec![], format: None }));
     let ui = MainWindow::new()?;
+    configure_color_picker(&ui);
     ui.set_app_version(env!("CARGO_PKG_VERSION").into());
     ui.set_source_license(env!("CARGO_PKG_LICENSE").into());
     ui.set_license_text(include_str!("../LICENSE").into());
@@ -582,7 +592,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         {
             return;
         }
-        let (frequency, gain) = a.plot.band_values_at(x.into(), y.into());
+        let (frequency, gain) = graph::band_values(x.into(), y.into());
         let mut config = a.cfg.clone();
         if config.add_peak(frequency, gain) {
             w.invoke_cancel_graph_drag();
@@ -795,6 +805,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let monitor_clipping = visible && w.get_show_clipping();
         let (snapshot, status, clipped, waveform) = {
             let mut shared = a.engine.shared.lock().unwrap();
+            shared.meter_capture_requested = cfg!(windows) && show_live_view && matches!(mode, 0 | live::STEREO_LEVEL_MODE);
             shared.scope_requested = show_live_view && mode == scope::MODE;
             shared.spectrum_requested = if show_live_view && mode == 2 {
                 Some(spectrum::Resolution::Detailed)
@@ -812,7 +823,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let spectrum = if shared.spectrum_requested.is_some() || (shared.clipped && monitor_clipping) {
                     shared.spectrum_levels.as_ref().map_or(state.spectrum.as_slice(), |levels| levels.as_slice()).to_vec()
                 } else { Vec::new() };
-                (state.meters, engine::AudioFormat::from(state), spectrum, outputs,
+                let mut meters = state.meters;
+                if let Some((rms, peak)) = shared.playback_levels {
+                    meters.stereo_rms = rms;
+                    meters.out_peak = peak;
+                }
+                (meters, engine::AudioFormat::from(state), spectrum, outputs,
                     state.preferred_output.clone(), label)
             });
             let waveform = if shared.scope_requested { shared.scope_samples.clone() } else { None };
@@ -822,7 +838,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         w.set_status(status.into()); w.set_connected(snapshot.is_some());
         let (spectrum, stereo_rms) = if let Some((meters, format, spectrum, outputs, preferred, label)) = snapshot {
             w.set_output_peak_dbfs(live::amplitude_dbfs(meters.out_peak));
-            let signal = if meters.out_peak > 0.00001 { "Audio detected at engine" } else { "No signal detected yet" };
+            let signal = if meters.out_peak > 0.00001 { "Audio detected" } else { "No signal detected yet" };
             w.set_signal(signal.into());
             if clipped {
                 clip_until = Instant::now() + Duration::from_secs(2);
@@ -831,7 +847,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if a.simple.active {
                         let [bass, mid, treble] = simple::clipping_controls(&regions);
                         w.set_simple_clipping(ToneClipping { bass, mid, treble });
-                    } else if !regions.is_empty() {
+                    } else {
                         let regions = regions.into_iter().map(|(start, end)| FrequencyRegion { start, end }).collect::<Vec<_>>();
                         w.set_clip_regions(Rc::new(VecModel::from(regions)).into());
                     }

@@ -379,6 +379,9 @@ fn init_windows_control_plane(
             let endpoints = audio::win_devices::enumerate_render_endpoints();
             let default = audio::win_devices::default_render_id();
             if auto_attach {
+                // A reconnected device needs its effect registration checked again.
+                attached.retain(|guid| endpoints.iter().any(|(id, _)|
+                    audio::win_devices::endpoint_guid(id) == Some(guid.as_str())));
                 for (id, _name) in &endpoints {
                     if let Some(guid) = audio::win_devices::endpoint_guid(id) {
                         if !attached.insert(guid.to_string()) {
@@ -392,7 +395,7 @@ fn init_windows_control_plane(
             // Feed the (cross-platform) output-mapping task: first sight at
             // startup counts as a change, which is what auto-applies the
             // device's mapped profile after a daemon restart.
-            if default.is_some() && default != last_default {
+            if default != last_default {
                 last_default.clone_from(&default);
                 if let Some(id) = default.clone() {
                     let _ = output_tx.send(id);

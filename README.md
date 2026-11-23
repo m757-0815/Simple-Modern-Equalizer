@@ -21,15 +21,25 @@ Simple Modern Equalizer is a system-wide equalizer for Linux and Windows. Tune t
 
 ## Shape the sound
 
-- In **Standard**, start with **Flat** for a spline EQ. Drag a point to shape the sound around it while the other points stay fixed. The 20 Hz and 20 kHz endpoints move vertically to change gain. Double-click the graph to add a point or use **Delete** on its row. Manual preamp shifts the entire curve. Auto Headroom adjusts the dB scale while keeping the points in place. Edit parametric presets using the band controls or select **Use spline** under **Settings → EQ type** to turn enabled bands into spline points.
+- In **Standard**, start with **Flat** for a spline EQ. Drag a point to shape the sound around it while the other points stay fixed. The 20 Hz and 20 kHz endpoints move vertically to change gain. Double-click the graph to add a point or use **Delete** on its row. Manual preamp ranges from −12 to +12 dB. Manual preamp and Auto Headroom shift the dB scale while the curve and its points stay in place. Edit parametric presets using the band controls or select **Use spline** under **Settings → EQ type** to turn enabled bands into spline points.
 - Choose Analog VU, Spectrum, Bars, Oscilloscope, or Stereo Level from the dropdown in **Live View**. The bar spectrum adapts to the view width with up to 512 bands. Stereo Level shows separate left and right RMS levels in dBFS. Drag the bottom grip to resize either graph. The EQ graph stays visible in **Standard** and can extend below the window. Scroll down to reach its grip again. Use **Settings** to show or hide optional panels or switch to full screen. Press **Esc** to exit full screen.
-- Under **Settings → Colors**, click a swatch to open its palette or enter a custom hex color. Both default to mint. **Apply colors** saves them immediately.
+- Under **Settings → Colors**, click a swatch to open its color wheel, adjust brightness, or enter RGB, HSV, or hex values. Both default to mint. **Apply colors** saves them immediately.
 - The **Enable Equalizer** box turns EQ and balance on or off in either layout. **Auto Headroom**, beside Loudness in Simple and Preamp in Standard, lowers the gain when boosts could cause clipping. During a clip, Simple highlights the dominant tone ranges in red, and Standard marks them on the EQ graph.
 - Save, rename, or overwrite your own presets from **Select Preset**. You can link a preset to a particular output, such as a USB DAC.
 
 ![Settings menu with display, output, and playback options](docs/screenshots/settings.png)
 
 On Windows, the development installer registers an unsigned audio component, sets `DisableProtectedAudioDG`, and restarts Windows Audio. It shares a component ID with Resonance and cannot be installed alongside it. The AppImage targets recent x86-64 PipeWire desktops. The RPM is built on Fedora 44. See [third-party notices](THIRD_PARTY_NOTICES.md).
+
+### Test the Windows audio driver
+
+Enable the equalizer, pause other playback, and run this from the repository in PowerShell.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-windows-audio.ps1
+```
+
+The test plays three quiet tones through the default output. It passes when fresh callbacks from the enabled APO follow the tone levels in the same Windows audio engine process. Exit code 0 means the test passed. A failure includes the number of callbacks observed during each tone. The test leaves your preset and volume settings unchanged.
 
 ## Contribute a preset
 

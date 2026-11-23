@@ -6,6 +6,7 @@ use std::{cell::{Cell, RefCell}, rc::Rc};
 fn window() -> MainWindow {
     i_slint_backend_testing::init_no_event_loop();
     let ui = MainWindow::new().unwrap();
+    crate::configure_color_picker(&ui);
     ui.window().set_size(LogicalSize::new(1120.0, 920.0));
     ui
 }
@@ -43,10 +44,14 @@ fn settings_submits_and_resets_all_colors() {
     });
     open_settings(&ui);
     element(&ui, "Graphs color picker", AccessibleRole::Button).invoke_accessible_default_action();
-    element(&ui, "Lavender", AccessibleRole::Button).invoke_accessible_default_action();
+    element(&ui, "Hex", AccessibleRole::Button).invoke_accessible_default_action();
+    element(&ui, "Picker hex", AccessibleRole::TextInput).set_accessible_value("#B8A0FF");
+    element(&ui, "Done", AccessibleRole::Button).invoke_accessible_default_action();
     assert_eq!(element(&ui, "Graphs color", AccessibleRole::TextInput).accessible_value().unwrap(), "#B8A0FF");
     element(&ui, "Accent text color picker", AccessibleRole::Button).invoke_accessible_default_action();
-    element(&ui, "Amber", AccessibleRole::Button).invoke_accessible_default_action();
+    element(&ui, "Hex", AccessibleRole::Button).invoke_accessible_default_action();
+    element(&ui, "Picker hex", AccessibleRole::TextInput).set_accessible_value("#FFBD72");
+    element(&ui, "Done", AccessibleRole::Button).invoke_accessible_default_action();
     assert_eq!(element(&ui, "Accent text color", AccessibleRole::TextInput).accessible_value().unwrap(), "#FFBD72");
     element(&ui, "Accent text color", AccessibleRole::TextInput).set_accessible_value("#ABCDEF");
     element(&ui, "Apply colors", AccessibleRole::Button).invoke_accessible_default_action();
@@ -208,6 +213,12 @@ fn preamp_spinbox_steps_by_005_and_auto_headroom_locks_controls() {
     assert!((submitted.get() - 0.05).abs() < 1e-6);
     slider.invoke_accessible_increment_action();
     assert!((ui.get_preamp() - 0.05).abs() < 1e-6);
+    ui.set_preamp(-12.0);
+    slider.invoke_accessible_decrement_action();
+    assert_eq!(ui.get_preamp(), -12.0);
+    ui.set_preamp(12.0);
+    slider.invoke_accessible_increment_action();
+    assert_eq!(ui.get_preamp(), 12.0);
     element(&ui, "Auto Headroom", AccessibleRole::Checkbox).invoke_accessible_default_action();
     assert_eq!(slider.accessible_enabled(), Some(false));
     assert_eq!(plus.accessible_enabled(), Some(false));
@@ -705,4 +716,48 @@ fn header_controls_stay_in_place_across_layouts() {
         ui.set_simple_layout(simple);
         assert_eq!(element(&ui, "Enable Equalizer", AccessibleRole::Button).accessible_enabled(), Some(true));
     }
+}
+
+#[test]
+fn navigation_stays_compact_after_window_resize_and_restore() {
+    let ui = window();
+    ui.set_show_band_list(false);
+    ui.set_live_view_height(146.0);
+    ui.set_eq_plot_height(190.0);
+    ui.set_preamp(-6.0);
+    ui.set_balance(0.25);
+    ui.show().unwrap();
+
+    for simple in [false, true] {
+        ui.set_simple_layout(simple);
+        for size in [(1920.0, 1056.0), (860.0, 520.0), (0.0, 0.0), (1920.0, 1056.0), (1120.0, 920.0)] {
+            ui.window().set_size(LogicalSize::new(size.0, size.1));
+            if size.0 == 0.0 { continue; }
+            for label in ["Simple", "Standard", "Settings"] {
+                let control = element(&ui, label, AccessibleRole::Button);
+                assert!(control.size().height <= 44.0,
+                    "{label} stretched to {}px at {size:?}, simple={simple}", control.size().height);
+                assert!(control.absolute_position().y <= 32.0);
+            }
+            assert_eq!(ui.get_live_view_height(), 146.0);
+            assert_eq!(ui.get_eq_plot_height(), 190.0);
+            assert_eq!(ui.get_preamp(), -6.0);
+            assert_eq!(ui.get_balance(), 0.25);
+        }
+    }
+}
+
+#[test]
+fn wheel_and_brightness_update_only_the_selected_swatch() {
+    let ui = window();
+    ui.show().unwrap();
+    open_settings(&ui);
+    element(&ui, "Graphs color picker", AccessibleRole::Button).invoke_accessible_default_action();
+    let wheel = element(&ui, "Hue and saturation wheel", AccessibleRole::Slider);
+    wheel.mock_single_click(PointerEventButton::Left);
+    element(&ui, "V", AccessibleRole::Slider).set_accessible_value("50");
+    element(&ui, "Done", AccessibleRole::Button).invoke_accessible_default_action();
+    let graph = element(&ui, "Graphs color", AccessibleRole::TextInput).accessible_value().unwrap();
+    assert!(graph == "#808080" || graph == "#7F7F7F", "got {graph}");
+    assert_eq!(element(&ui, "Accent text color", AccessibleRole::TextInput).accessible_value().unwrap(), "#77D9BD");
 }
