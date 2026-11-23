@@ -21,6 +21,62 @@ fn open_settings(ui: &MainWindow) {
     element(ui, "Settings", AccessibleRole::Button).invoke_accessible_default_action();
 }
 
+#[test]
+fn widget_accent_follows_the_app_when_the_desktop_reports_a_different_color() {
+    use slint::private_unstable_api::re_exports::{ChangeTracker, WindowInner};
+
+    let ui = window();
+    crate::apply_colors(&ui, crate::theme::ThemeColors::default());
+    let _tracker = crate::keep_widget_accent(&ui);
+    ui.show().unwrap();
+
+    let context = WindowInner::from_pub(ui.window()).context();
+    let blue = slint::Color::from_rgb_u8(50, 108, 207);
+    context.set_accent_color(blue);
+    ChangeTracker::run_change_handlers();
+    assert_eq!(context.accent_color(), ui.global::<crate::Appearance>().get_accent());
+
+    let previous_accent = context.accent_color();
+    crate::apply_colors(&ui, crate::theme::ThemeColors::parse("#E79B59").unwrap());
+    context.set_accent_color(previous_accent);
+    ChangeTracker::run_change_handlers();
+    assert_eq!(context.accent_color(), slint::Color::from_rgb_u8(231, 155, 89));
+}
+
+#[test]
+fn preset_menu_requests_equalizer_apo_import() {
+    let ui = window();
+    let requested = Rc::new(Cell::new(false));
+    let captured = requested.clone();
+    ui.on_import_apo(move || captured.set(true));
+    ui.show().unwrap();
+    element(&ui, "Select Preset", AccessibleRole::Button).invoke_accessible_default_action();
+    element(&ui, "Import Equalizer APO", AccessibleRole::Button).invoke_accessible_default_action();
+    assert!(requested.get());
+}
+
+#[test]
+fn login_checkbox_reflects_successful_changes_and_reverts_failed_changes() {
+    let ui = window();
+    ui.set_has_login_start(true);
+    let reject = Rc::new(Cell::new(true));
+    let reject_change = reject.clone();
+    ui.on_change_login_start(move |_| {
+        if reject_change.get() { "Could not update login startup.".into() } else { "".into() }
+    });
+    ui.show().unwrap();
+    open_settings(&ui);
+    let option = element(&ui, "Start on login", AccessibleRole::Checkbox);
+    assert_eq!(option.accessible_checked(), Some(false));
+    option.invoke_accessible_default_action();
+    assert!(!ui.get_login_start());
+    reject.set(false);
+    option.invoke_accessible_default_action();
+    assert!(ui.get_login_start());
+    option.invoke_accessible_default_action();
+    assert!(!ui.get_login_start());
+}
+
 fn click(ui: &MainWindow, position: LogicalPosition) {
     ui.window().dispatch_event(WindowEvent::PointerPressed { position, button: PointerEventButton::Left });
     ui.window().dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
@@ -33,33 +89,35 @@ fn key(ui: &MainWindow, text: impl Into<SharedString>) {
 }
 
 #[test]
-fn settings_submits_and_resets_all_colors() {
+fn applying_the_accent_updates_the_app_symbol_and_can_reset_it() {
     let ui = window();
     ui.show().unwrap();
     let submitted = Rc::new(RefCell::new(Vec::new()));
     let captured = Rc::clone(&submitted);
-    ui.on_change_colors(move |graph, text| {
-        captured.borrow_mut().push([graph, text]);
+    let weak = ui.as_weak();
+    ui.on_change_colors(move |value| {
+        let colors = crate::theme::ThemeColors::parse(&value).unwrap();
+        captured.borrow_mut().push(value);
+        crate::apply_colors(&weak.upgrade().unwrap(), colors);
         "".into()
     });
     open_settings(&ui);
-    element(&ui, "Graphs color picker", AccessibleRole::Button).invoke_accessible_default_action();
+    element(&ui, "Accent color picker", AccessibleRole::Button).invoke_accessible_default_action();
     element(&ui, "Hex", AccessibleRole::Button).invoke_accessible_default_action();
     element(&ui, "Picker hex", AccessibleRole::TextInput).set_accessible_value("#B8A0FF");
     element(&ui, "Done", AccessibleRole::Button).invoke_accessible_default_action();
-    assert_eq!(element(&ui, "Graphs color", AccessibleRole::TextInput).accessible_value().unwrap(), "#B8A0FF");
-    element(&ui, "Accent text color picker", AccessibleRole::Button).invoke_accessible_default_action();
-    element(&ui, "Hex", AccessibleRole::Button).invoke_accessible_default_action();
-    element(&ui, "Picker hex", AccessibleRole::TextInput).set_accessible_value("#FFBD72");
-    element(&ui, "Done", AccessibleRole::Button).invoke_accessible_default_action();
-    assert_eq!(element(&ui, "Accent text color", AccessibleRole::TextInput).accessible_value().unwrap(), "#FFBD72");
-    element(&ui, "Accent text color", AccessibleRole::TextInput).set_accessible_value("#ABCDEF");
-    element(&ui, "Apply colors", AccessibleRole::Button).invoke_accessible_default_action();
-    element(&ui, "Reset colors", AccessibleRole::Button).invoke_accessible_default_action();
-    assert_eq!(submitted.borrow().as_slice(), &[
-        ["#B8A0FF", "#ABCDEF"].map(SharedString::from),
-        ["#77D9BD", "#77D9BD"].map(SharedString::from),
-    ]);
+    let field = element(&ui, "Accent color", AccessibleRole::TextInput);
+    assert_eq!(field.accessible_value().unwrap(), "#B8A0FF");
+    let appearance = ui.global::<crate::Appearance>();
+    let icon = appearance.get_app_icon().to_rgba8().unwrap();
+    assert!(icon.as_bytes().chunks_exact(4).any(|pixel| pixel == [184, 160, 255, 255]));
+    field.set_accessible_value("#ABCDEF");
+    element(&ui, "Apply color", AccessibleRole::Button).invoke_accessible_default_action();
+    assert_eq!(appearance.get_accent_hex(), "#ABCDEF");
+    element(&ui, "Reset color", AccessibleRole::Button).invoke_accessible_default_action();
+    let default = crate::theme::ThemeColors::hex(crate::theme::DEFAULT_ACCENT);
+    assert_eq!(appearance.get_accent_hex(), default.as_str());
+    assert_eq!(submitted.borrow().as_slice(), &["#B8A0FF", "#ABCDEF", default.as_str()].map(SharedString::from));
 }
 
 #[test]
@@ -184,18 +242,22 @@ fn balance_controls_share_a_row_and_adjust_in_small_steps() {
     let ui = window();
     ui.show().unwrap();
     ui.window().set_size(LogicalSize::new(860.0, 1060.0));
-    let heading = ElementHandle::find_by_element_id(&ui, "MainWindow::balance-heading").next().unwrap();
-    let readout = ElementHandle::find_by_element_id(&ui, "MainWindow::balance-readout").next().unwrap();
-    let slider = element(&ui, "Balance", AccessibleRole::Slider);
-    let center = element(&ui, "Center", AccessibleRole::Button);
-    let controls = [&heading, &readout, &slider, &center];
-    for pair in controls.windows(2) {
-        assert!(pair[0].absolute_position().x < pair[1].absolute_position().x);
+    for simple in [false, true] {
+        ui.set_simple_layout(simple);
+        ui.set_balance(0.0);
+        let heading = ElementHandle::find_by_element_id(&ui, "MainWindow::balance-heading").next().unwrap();
+        let readout = ElementHandle::find_by_element_id(&ui, "MainWindow::balance-readout").next().unwrap();
+        let slider = element(&ui, "Balance", AccessibleRole::Slider);
+        let center = element(&ui, "Center", AccessibleRole::Button);
+        let controls = [&heading, &readout, &slider, &center];
+        for pair in controls.windows(2) {
+            assert!(pair[0].absolute_position().x < pair[1].absolute_position().x);
+        }
+        let center_y = |control: &ElementHandle| control.absolute_position().y + control.size().height / 2.0;
+        assert!(controls.iter().all(|control| (center_y(control) - center_y(&heading)).abs() <= 1.0));
+        slider.invoke_accessible_increment_action();
+        assert!((ui.get_balance() - 0.05).abs() < 1e-6);
     }
-    let center_y = |control: &ElementHandle| control.absolute_position().y + control.size().height / 2.0;
-    assert!(controls.iter().all(|control| (center_y(control) - center_y(&heading)).abs() <= 1.0));
-    slider.invoke_accessible_increment_action();
-    assert!((ui.get_balance() - 0.05).abs() < 1e-6);
 }
 
 #[test]
@@ -206,23 +268,28 @@ fn preamp_spinbox_steps_by_005_and_auto_headroom_locks_controls() {
     let submitted = Rc::new(Cell::new(0.0));
     let capture = submitted.clone();
     ui.on_change_preamp(move |value| capture.set(value));
-    let slider = element(&ui, "Preamp", AccessibleRole::Slider);
-    let plus = element(&ui, "Increase preamp", AccessibleRole::Button);
-    let entry = element(&ui, "Preamp in dB", AccessibleRole::TextInput);
-    plus.invoke_accessible_default_action();
-    assert!((submitted.get() - 0.05).abs() < 1e-6);
-    slider.invoke_accessible_increment_action();
-    assert!((ui.get_preamp() - 0.05).abs() < 1e-6);
-    ui.set_preamp(-12.0);
-    slider.invoke_accessible_decrement_action();
-    assert_eq!(ui.get_preamp(), -12.0);
-    ui.set_preamp(12.0);
-    slider.invoke_accessible_increment_action();
-    assert_eq!(ui.get_preamp(), 12.0);
-    element(&ui, "Auto Headroom", AccessibleRole::Checkbox).invoke_accessible_default_action();
-    assert_eq!(slider.accessible_enabled(), Some(false));
-    assert_eq!(plus.accessible_enabled(), Some(false));
-    assert_eq!(entry.accessible_enabled(), Some(false));
+    for simple in [false, true] {
+        ui.set_simple_layout(simple);
+        ui.set_auto_headroom(false);
+        ui.set_preamp(0.0);
+        let slider = element(&ui, "Preamp", AccessibleRole::Slider);
+        let plus = element(&ui, "Increase preamp", AccessibleRole::Button);
+        let entry = element(&ui, "Preamp in dB", AccessibleRole::TextInput);
+        plus.invoke_accessible_default_action();
+        assert!((submitted.get() - 0.05).abs() < 1e-6);
+        slider.invoke_accessible_increment_action();
+        assert!((ui.get_preamp() - 0.05).abs() < 1e-6);
+        ui.set_preamp(-12.0);
+        slider.invoke_accessible_decrement_action();
+        assert_eq!(ui.get_preamp(), -12.0);
+        ui.set_preamp(12.0);
+        slider.invoke_accessible_increment_action();
+        assert_eq!(ui.get_preamp(), 12.0);
+        element(&ui, "Auto Headroom", AccessibleRole::Checkbox).invoke_accessible_default_action();
+        assert_eq!(slider.accessible_enabled(), Some(false));
+        assert_eq!(plus.accessible_enabled(), Some(false));
+        assert_eq!(entry.accessible_enabled(), Some(false));
+    }
 }
 
 #[test]
@@ -313,6 +380,7 @@ fn eq_graph_height_adjusts_the_plot_in_place() {
     ui.show().unwrap();
     ui.window().set_size(LogicalSize::new(860.0, 1080.0));
     let plot = ElementHandle::find_by_element_id(&ui, "MainWindow::plot").next().unwrap();
+    assert!(f64::from(plot.size().width) * crate::spline::MIN_POINT_GAP >= 20.0);
     let slider = element(&ui, "EQ graph height", AccessibleRole::Slider);
     assert_eq!(plot.size().height, 260.0);
     let point = slider.absolute_position();
@@ -362,30 +430,33 @@ fn live_panel_selects_all_displays_and_visibility_stays_in_settings() {
     let ui = window();
     ui.set_simple_layout(true);
     ui.show().unwrap();
+    for title in ["Live Monitor", "Tone Controls", "Preamp & Balance"] {
+        assert!(ElementHandle::find_by_accessible_label(&ui, title).next().is_some(), "{title}");
+    }
     let display = element(&ui, "Live display", AccessibleRole::Combobox);
-    assert_eq!(display.accessible_value().unwrap(), "Analog VU");
+    assert_eq!(display.accessible_value().unwrap(), "Bars");
     display.invoke_accessible_expand_action();
-    for (index, label) in ["Spectrum", "Bars", "Oscilloscope", "Stereo Level"].into_iter().enumerate() {
+    for (index, label) in ["Oscilloscope", "Stereo Level", "Before / After EQ", "Loudness History", "Stereo Field"].into_iter().enumerate() {
         key(&ui, Key::DownArrow);
         assert_eq!(ui.get_live_mode(), index as i32 + 1);
         assert_eq!(display.accessible_value().unwrap(), label);
     }
     key(&ui, Key::Return);
     ui.set_simple_layout(false);
-    assert_eq!(element(&ui, "Live display", AccessibleRole::Combobox).accessible_value().unwrap(), "Stereo Level");
+    assert_eq!(element(&ui, "Live display", AccessibleRole::Combobox).accessible_value().unwrap(), "Stereo Field");
     open_settings(&ui);
-    let toggle = element(&ui, "Live View", AccessibleRole::Checkbox);
+    let toggle = element(&ui, "Live Monitor", AccessibleRole::Checkbox);
     toggle.invoke_accessible_default_action();
     assert!(!ui.get_show_live_view());
     assert!(ElementHandle::find_by_accessible_label(&ui, "Live display").next().is_none());
     toggle.invoke_accessible_default_action();
-    assert_eq!(element(&ui, "Live display", AccessibleRole::Combobox).accessible_value().unwrap(), "Stereo Level");
+    assert_eq!(element(&ui, "Live display", AccessibleRole::Combobox).accessible_value().unwrap(), "Stereo Field");
 }
 
 #[test]
 fn stereo_level_displays_separate_channel_readings_in_both_layouts() {
     let ui = window();
-    ui.set_live_mode(4);
+    ui.set_live_mode(crate::live::STEREO_LEVEL_MODE);
     ui.set_left_level_dbfs(-12.0);
     ui.set_right_level_dbfs(-30.0);
     ui.show().unwrap();
@@ -428,7 +499,7 @@ fn both_plots_report_their_display_size_after_resizing() {
 #[test]
 fn live_view_toggle_collapses_the_panel_and_preserves_its_settings() {
     let ui = window();
-    ui.set_live_mode(3);
+    ui.set_live_mode(crate::scope::MODE);
     ui.set_live_view_height(300.0);
     ui.show().unwrap();
     ui.window().set_size(LogicalSize::new(1120.0, 1040.0));
@@ -436,7 +507,7 @@ fn live_view_toggle_collapses_the_panel_and_preserves_its_settings() {
     let plot = ElementHandle::find_by_element_id(&ui, "MainWindow::plot").next().unwrap();
     let initial_plot_y = plot.absolute_position().y;
     open_settings(&ui);
-    let toggle = element(&ui, "Live View", AccessibleRole::Checkbox);
+    let toggle = element(&ui, "Live Monitor", AccessibleRole::Checkbox);
 
     toggle.invoke_accessible_default_action();
     assert!(live_panel().is_none());
@@ -445,7 +516,7 @@ fn live_view_toggle_collapses_the_panel_and_preserves_its_settings() {
     ui.set_live_view_height(420.0);
     assert_eq!(plot.absolute_position().y, collapsed_plot_y);
     ui.set_live_view_height(300.0);
-    assert_eq!(ui.get_live_mode(), 3);
+    assert_eq!(ui.get_live_mode(), crate::scope::MODE);
 
     toggle.invoke_accessible_default_action();
     assert_eq!(live_panel().unwrap().size().height, 300.0);
@@ -453,37 +524,9 @@ fn live_view_toggle_collapses_the_panel_and_preserves_its_settings() {
 }
 
 #[test]
-fn analog_vu_scales_proportionally_and_stays_centered() {
-    let ui = window();
-    ui.show().unwrap();
-    ui.window().set_size(LogicalSize::new(860.0, 900.0));
-    let mut previous_width = 0.0;
-    for height in [146.0, 216.0, 420.0] {
-        ui.set_live_view_height(height);
-        let plot = ElementHandle::find_by_element_id(&ui, "MainWindow::live-plot").next().unwrap();
-        let vu = ElementHandle::find_by_element_id(&ui, "MainWindow::vu-plot").next().unwrap();
-        let size = vu.size();
-        assert!((size.width - 4.0 * size.height).abs() < 0.01);
-        assert!(size.width > previous_width);
-        assert!(size.width <= plot.size().width && size.height <= plot.size().height);
-        let inset = vu.absolute_position().x - plot.absolute_position().x;
-        assert!((2.0 * inset - (plot.size().width - size.width)).abs() < 0.01);
-        i_slint_backend_testing::mock_elapsed_time(std::time::Duration::from_millis(16));
-        let extent = ui.get_live_plot_extent();
-        assert_eq!((extent.width, extent.height), (size.width, size.height));
-        previous_width = size.width;
-    }
-    ui.set_live_mode(1);
-    i_slint_backend_testing::mock_elapsed_time(std::time::Duration::from_millis(16));
-    let plot = ElementHandle::find_by_element_id(&ui, "MainWindow::live-plot").next().unwrap();
-    let extent = ui.get_live_plot_extent();
-    assert_eq!((extent.width, extent.height), (plot.size().width, plot.size().height));
-}
-
-#[test]
 fn stereo_tick_labels_fit_between_the_meters_and_status_at_minimum_size() {
     let ui = window();
-    ui.set_live_mode(4);
+    ui.set_live_mode(crate::live::STEREO_LEVEL_MODE);
     ui.set_live_view_height(146.0);
     ui.set_signal("Waiting for audio engine".into());
     ui.window().set_size(LogicalSize::new(860.0, 520.0));
@@ -502,16 +545,37 @@ fn stereo_tick_labels_fit_between_the_meters_and_status_at_minimum_size() {
 }
 
 #[test]
-fn spline_conversion_is_available_from_standard_settings() {
+fn standard_controls_switch_eq_editors_in_both_directions() {
     let ui = window();
-    let invoked = Rc::new(Cell::new(false));
-    let capture = invoked.clone();
-    ui.on_enable_spline(move || capture.set(true));
+    ui.set_show_live_view(false);
+    let weak = ui.as_weak();
+    ui.on_toggle_eq_mode(move || {
+        let ui = weak.upgrade().unwrap();
+        ui.set_spline_eq(!ui.get_spline_eq());
+    });
     ui.show().unwrap();
-    assert!(ElementHandle::find_by_accessible_label(&ui, "Use spline").next().is_none());
+    for title in ["Preamp & Balance", "Equalizer Points"] {
+        assert!(ElementHandle::find_by_accessible_label(&ui, title).next().is_some(), "{title}");
+    }
+    let title = ElementHandle::find_by_accessible_label(&ui, "Equalizer Graph").next().unwrap();
+    let button = element(&ui, "Use Spline From EQ Graph", AccessibleRole::Button);
+    let title_right = title.absolute_position().x + title.size().width;
+    assert!((0.0..=12.0).contains(&(button.absolute_position().x - title_right)));
+    assert!(button.absolute_position().x < 275.0);
+    let center = |control: &ElementHandle| control.absolute_position().y + control.size().height / 2.0;
+    assert!((center(&title) - center(&button)).abs() < 2.0);
+    for controls in ["EQ Graph", "EQ Bands"] {
+        element(&ui, &format!("Use Spline From {controls}"), AccessibleRole::Button).invoke_accessible_default_action();
+        assert!(ui.get_spline_eq());
+        element(&ui, &format!("Use Parametric From {controls}"), AccessibleRole::Button).invoke_accessible_default_action();
+        assert!(!ui.get_spline_eq());
+    }
+    assert!(ElementHandle::find_by_accessible_label(&ui, "Use Spline").next().is_none());
     open_settings(&ui);
-    element(&ui, "Use spline", AccessibleRole::Button).invoke_accessible_default_action();
-    assert!(invoked.get());
+    element(&ui, "Use Spline", AccessibleRole::Button).invoke_accessible_default_action();
+    assert!(ui.get_spline_eq());
+    element(&ui, "Use Parametric", AccessibleRole::Button).invoke_accessible_default_action();
+    assert!(!ui.get_spline_eq());
 }
 
 #[test]
@@ -532,6 +596,24 @@ fn live_view_grows_in_both_layouts() {
         assert!(compact < medium && medium < large, "simple={simple}: {compact}, {medium}, {large}");
     }
 
+}
+
+#[test]
+fn spare_window_height_stays_below_the_band_controls() {
+    let ui = window();
+    ui.set_show_live_view(false);
+    ui.set_eq_plot_height(130.0);
+    ui.set_bands(Rc::new(VecModel::from(vec![BandRow::default(); 8])).into());
+    ui.show().unwrap();
+    let count = ElementHandle::find_by_element_id(&ui, "MainWindow::band-count-control").next().unwrap();
+    let first_band = element(&ui, "Band 1 frequency", AccessibleRole::TextInput);
+    let compact_height = count.size().height;
+    let compact_y = first_band.absolute_position().y;
+
+    ui.window().set_size(LogicalSize::new(1120.0, 1450.0));
+    assert!(compact_height <= 44.0);
+    assert_eq!(count.size().height, compact_height);
+    assert_eq!(first_band.absolute_position().y, compact_y);
 }
 
 #[test]
@@ -672,7 +754,7 @@ fn escape_exits_full_screen_and_clears_the_settings_checkbox() {
 }
 
 #[test]
-fn header_controls_stay_in_place_across_layouts() {
+fn toolbar_and_equalizer_box_stay_in_place_across_layouts() {
     let ui = window();
     ui.set_simple_layout(true);
     ui.set_presets(Rc::new(VecModel::from(vec![SharedString::from("Flat")])).into());
@@ -683,20 +765,37 @@ fn header_controls_stay_in_place_across_layouts() {
     let captured = preset.clone();
     ui.on_choose_preset(move |index| captured.set(Some(index)));
     ui.show().unwrap();
+    let undo = element(&ui, "Undo", AccessibleRole::Button);
+    assert_eq!(undo.accessible_enabled(), Some(false));
+    let undone = Rc::new(Cell::new(false));
+    let capture = undone.clone();
+    ui.on_undo(move || capture.set(true));
+    ui.set_can_undo(true);
+    undo.invoke_accessible_default_action();
+    assert!(undone.get());
 
     let header_positions = || {
-        ["Simple", "Standard", "Select Preset", "Settings", "Enable Equalizer"].map(|label|
+        ["Simple", "Standard", "Select Preset", "Settings"].map(|label|
             element(&ui, label, AccessibleRole::Button).absolute_position())
     };
     let simple_positions = header_positions();
     let equalizer = element(&ui, "Enable Equalizer", AccessibleRole::Button);
+    let toolbar = ElementHandle::find_by_element_id(&ui, "MainWindow::toolbar").next().unwrap();
+    let equalizer_box = ElementHandle::find_by_element_id(&ui, "MainWindow::equalizer-box").next().unwrap();
+    let heading = ElementHandle::find_by_accessible_label(&ui, "Equalizer On Off").next().unwrap();
+    let equalizer_position = equalizer.absolute_position();
+    assert!(heading.absolute_position().x + heading.size().width <= equalizer_position.x);
+    assert!(equalizer_box.absolute_position().y >= toolbar.absolute_position().y + toolbar.size().height);
+    assert!(equalizer_position.y >= equalizer_box.absolute_position().y);
+    assert!(equalizer_position.y + equalizer.size().height <= equalizer_box.absolute_position().y + equalizer_box.size().height);
     assert!(!ui.get_bypass());
     equalizer.invoke_accessible_default_action();
     open_settings(&ui);
-    element(&ui, "Live View", AccessibleRole::Checkbox).invoke_accessible_default_action();
+    element(&ui, "Live Monitor", AccessibleRole::Checkbox).invoke_accessible_default_action();
     assert_eq!(bypass.get(), Some(true));
     ui.set_simple_layout(false);
     assert_eq!(header_positions(), simple_positions);
+    assert_eq!(equalizer.absolute_position(), equalizer_position);
     assert!(ui.get_bypass());
     assert!(!ui.get_show_live_view());
     for label in ["Show A/B", "Set A", "End A/B"] {
@@ -716,6 +815,37 @@ fn header_controls_stay_in_place_across_layouts() {
         ui.set_simple_layout(simple);
         assert_eq!(element(&ui, "Enable Equalizer", AccessibleRole::Button).accessible_enabled(), Some(true));
     }
+}
+
+#[test]
+fn equalizer_box_remains_visible_and_clickable_when_simple_view_scrolls() {
+    let ui = window();
+    ui.set_simple_layout(true);
+    ui.set_show_live_view(true);
+    ui.set_live_view_height(300.0);
+    ui.window().set_size(LogicalSize::new(860.0, 520.0));
+    ui.show().unwrap();
+
+    let live = ElementHandle::find_by_element_id(&ui, "MainWindow::live-view").next().unwrap();
+    let equalizer = element(&ui, "Enable Equalizer", AccessibleRole::Button);
+    let live_start = live.absolute_position();
+    let equalizer_start = equalizer.absolute_position();
+    ui.window().dispatch_event(WindowEvent::PointerScrolled {
+        position: LogicalPosition::new(10.0, 200.0),
+        delta_x: 0.0,
+        delta_y: -4000.0,
+    });
+    i_slint_backend_testing::mock_elapsed_time(std::time::Duration::from_millis(250));
+
+    assert!(live.absolute_position().y < live_start.y);
+    assert_eq!(equalizer.absolute_position(), equalizer_start);
+    let center = LogicalPosition::new(
+        equalizer_start.x + equalizer.size().width / 2.0,
+        equalizer_start.y + equalizer.size().height / 2.0,
+    );
+    ui.window().dispatch_event(WindowEvent::PointerPressed { position: center, button: PointerEventButton::Left });
+    ui.window().dispatch_event(WindowEvent::PointerReleased { position: center, button: PointerEventButton::Left });
+    assert!(ui.get_bypass());
 }
 
 #[test]
@@ -739,6 +869,17 @@ fn navigation_stays_compact_after_window_resize_and_restore() {
                     "{label} stretched to {}px at {size:?}, simple={simple}", control.size().height);
                 assert!(control.absolute_position().y <= 32.0);
             }
+            let title = ElementHandle::find_by_element_id(&ui, "MainWindow::app-title").next().unwrap();
+            let right_edge = |control: &ElementHandle| control.absolute_position().x + control.size().width;
+            let simple_button = element(&ui, "Simple", AccessibleRole::Button);
+            let standard = element(&ui, "Standard", AccessibleRole::Button);
+            let presets = element(&ui, "Select Preset", AccessibleRole::Button);
+            let settings = element(&ui, "Settings", AccessibleRole::Button);
+            assert!((0.0..=16.0).contains(&(simple_button.absolute_position().x - right_edge(&title))));
+            assert!(simple_button.absolute_position().x < 360.0);
+            assert!(presets.absolute_position().x - right_edge(&standard) > 40.0);
+            assert!((0.0..=12.0).contains(&(settings.absolute_position().x - right_edge(&presets))));
+            assert!((0.0..=45.0).contains(&(size.0 - right_edge(&settings))));
             assert_eq!(ui.get_live_view_height(), 146.0);
             assert_eq!(ui.get_eq_plot_height(), 190.0);
             assert_eq!(ui.get_preamp(), -6.0);
@@ -748,16 +889,20 @@ fn navigation_stays_compact_after_window_resize_and_restore() {
 }
 
 #[test]
-fn wheel_and_brightness_update_only_the_selected_swatch() {
+fn wheel_and_brightness_apply_the_selected_accent() {
     let ui = window();
+    let weak = ui.as_weak();
+    ui.on_change_colors(move |value| {
+        crate::apply_colors(&weak.upgrade().unwrap(), crate::theme::ThemeColors::parse(&value).unwrap());
+        "".into()
+    });
     ui.show().unwrap();
     open_settings(&ui);
-    element(&ui, "Graphs color picker", AccessibleRole::Button).invoke_accessible_default_action();
+    element(&ui, "Accent color picker", AccessibleRole::Button).invoke_accessible_default_action();
     let wheel = element(&ui, "Hue and saturation wheel", AccessibleRole::Slider);
     wheel.mock_single_click(PointerEventButton::Left);
     element(&ui, "V", AccessibleRole::Slider).set_accessible_value("50");
     element(&ui, "Done", AccessibleRole::Button).invoke_accessible_default_action();
-    let graph = element(&ui, "Graphs color", AccessibleRole::TextInput).accessible_value().unwrap();
+    let graph = element(&ui, "Accent color", AccessibleRole::TextInput).accessible_value().unwrap();
     assert!(graph == "#808080" || graph == "#7F7F7F", "got {graph}");
-    assert_eq!(element(&ui, "Accent text color", AccessibleRole::TextInput).accessible_value().unwrap(), "#77D9BD");
 }

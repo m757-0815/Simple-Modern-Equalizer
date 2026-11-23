@@ -35,6 +35,29 @@ pub fn response_for_frequencies(
     }).collect()
 }
 
+/// Reuse the frequency basis when evaluating many candidate filters on one grid.
+pub struct ResponseGrid {
+    sample_rate: f64,
+    basis: Vec<[f64; 4]>,
+}
+
+impl ResponseGrid {
+    pub fn new(frequencies: &[f64], sample_rate: f64) -> Self {
+        let basis = frequencies.iter().map(|frequency| {
+            let w = std::f64::consts::TAU * frequency / sample_rate;
+            [w.cos(), w.sin(), (2.0 * w).cos(), (2.0 * w).sin()]
+        }).collect();
+        Self { sample_rate, basis }
+    }
+
+    pub fn band_response(&self, band: &BandState) -> Vec<f64> {
+        let Some(coefficients) = band.enabled.then(|| coeffs_for(band, self.sample_rate)).flatten() else {
+            return vec![0.0; self.basis.len()];
+        };
+        self.basis.iter().map(|&basis| biquad_mag_on_basis(&coefficients, basis)).collect()
+    }
+}
+
 /// Build biquad coefficients for a band according to its filter type.
 fn coeffs_for(b: &BandState, sr: f64) -> Option<BiquadCoeffs> {
     match b.band_type {
@@ -99,7 +122,10 @@ fn biquad_mag_db(c: &BiquadCoeffs, freq: f64, sr: f64) -> f64 {
     let w = 2.0 * PI * freq / sr;
     let (c1, s1) = (w.cos(), w.sin());
     let (c2, s2) = ((2.0 * w).cos(), (2.0 * w).sin());
+    biquad_mag_on_basis(c, [c1, s1, c2, s2])
+}
 
+fn biquad_mag_on_basis(c: &BiquadCoeffs, [c1, s1, c2, s2]: [f64; 4]) -> f64 {
     let num = mag(c.b0 + c.b1 * c1 + c.b2 * c2, -(c.b1 * s1 + c.b2 * s2));
     let den = mag(1.0 + c.a1 * c1 + c.a2 * c2, -(c.a1 * s1 + c.a2 * s2));
 

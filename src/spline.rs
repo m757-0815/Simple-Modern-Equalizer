@@ -1,6 +1,13 @@
 use crate::config::Band;
 use rustfft::{FftPlanner, num_complex::Complex};
 
+// A 20 px handle needs this fraction of the log-frequency graph at minimum window width.
+pub const MIN_POINT_GAP: f64 = 0.028;
+
+pub fn points_are_spaced(first: f64, second: f64) -> bool {
+    (second / first).log10().abs() / 3.0 + 1e-12 >= MIN_POINT_GAP
+}
+
 pub fn gain_at(points: &[Band], frequency: f64) -> f64 {
     let right = points.partition_point(|point| point.frequency_hz <= frequency);
     match right {

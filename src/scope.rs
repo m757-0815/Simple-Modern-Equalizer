@@ -1,13 +1,20 @@
 use resonance_ipc::transport::SyncClient;
 
-pub const MODE: i32 = 3;
-const CAPTURE_FRAMES: u32 = 8192;
+pub const MODE: i32 = 1;
+pub const CAPTURE_FRAMES: u32 = 8192;
+
+pub fn waveform_capture_frames(rate: f64) -> u32 {
+    // Twenty milliseconds of display with room for trigger alignment.
+    (rate / 35.0).ceil().clamp(2.0, f64::from(CAPTURE_FRAMES)) as u32
+}
 
 pub struct Audio {
     pub samples: Vec<f32>,
     pub rate: f64,
     #[cfg(windows)]
     pub levels: Option<([f32; 2], f32)>,
+    #[cfg(windows)]
+    pub stereo: Vec<[f32; 2]>,
 }
 
 /// Show 20 ms, using a nearby rising zero crossing when one fits in the history.
@@ -39,15 +46,17 @@ impl Capture {
         client: &mut SyncClient,
         state: &resonance_ipc::DaemonState,
         enabled: bool,
+        frames: u32,
+        _stereo_requested: bool,
     ) -> Option<Audio> {
         use resonance_ipc::{Command, Response};
         if !enabled {
             return None;
         }
-        if state.meters.out_peak <= 0.00001 {
+        if frames == 0 || state.meters.out_peak <= 0.00001 {
             return Some(Audio { samples: Vec::new(), rate: state.sample_rate });
         }
-        match client.send_recv(Command::CaptureOutput { frames: CAPTURE_FRAMES }).ok()? {
+        match client.send_recv(Command::CaptureOutput { frames }).ok()? {
             Response::Capture { rate, samples } => Some(Audio { samples, rate }),
             _ => None,
         }
@@ -76,6 +85,8 @@ mod windows {
             _: &mut SyncClient,
             state: &resonance_ipc::DaemonState,
             enabled: bool,
+            frames: u32,
+            stereo_requested: bool,
         ) -> Option<Audio> {
             if !enabled {
                 *self = Self::default();
@@ -93,7 +104,7 @@ mod windows {
                 self.retry_after = Some(Instant::now() + Duration::from_secs(1));
                 self.loopback = Loopback::start();
             }
-            self.loopback.as_ref().map(Loopback::audio)
+            self.loopback.as_ref().map(|loopback| loopback.audio(frames, stereo_requested))
         }
     }
 
@@ -106,6 +117,7 @@ mod windows {
 
     struct Buffer {
         samples: VecDeque<f32>,
+        stereo: VecDeque<[f32; 2]>,
         updated: Option<Instant>,
         levels: ([f32; 2], f32),
     }
@@ -120,6 +132,7 @@ mod windows {
             }
             let buffer = Arc::new(Mutex::new(Buffer {
                 samples: VecDeque::with_capacity(CAPTURE_FRAMES as usize),
+                stereo: VecDeque::with_capacity(crate::monitor::FIELD_FRAMES),
                 updated: None,
                 levels: ([0.0; 2], 0.0),
             }));
@@ -135,13 +148,16 @@ mod windows {
             Some(Self { _stream: stream, rate: f64::from(config.sample_rate), buffer, failed })
         }
 
-        fn audio(&self) -> Audio {
+        fn audio(&self, frames: u32, stereo_requested: bool) -> Audio {
             let mut buffer = self.buffer.lock().unwrap();
             if buffer.updated.is_none_or(|updated| updated.elapsed() >= Duration::from_millis(150)) {
                 buffer.samples.clear();
-                return Audio { samples: Vec::new(), rate: self.rate, levels: None };
+                buffer.stereo.clear();
+                return Audio { samples: Vec::new(), rate: self.rate, levels: None, stereo: Vec::new() };
             }
-            Audio { samples: buffer.samples.iter().copied().collect(), rate: self.rate, levels: Some(buffer.levels) }
+            let stereo = if stereo_requested { buffer.stereo.iter().copied().collect() } else { Vec::new() };
+            let start = buffer.samples.len().saturating_sub(frames as usize);
+            Audio { samples: buffer.samples.iter().skip(start).copied().collect(), rate: self.rate, levels: Some(buffer.levels), stereo }
         }
     }
 
@@ -179,6 +195,10 @@ mod windows {
                             buffer.samples.pop_front();
                         }
                         buffer.samples.push_back(sum / channels as f32);
+                        if buffer.stereo.len() == crate::monitor::FIELD_FRAMES {
+                            buffer.stereo.pop_front();
+                        }
+                        buffer.stereo.push_back([left, right]);
                     }
                     let frames = (samples.len() / channels) as f32;
                     buffer.levels = (squares.map(|s| (s / frames).sqrt()), peak);

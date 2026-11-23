@@ -9,5 +9,5 @@ mkdir -p dist/linux/share/applications dist/linux/share/icons/hicolor/256x256/ap
 cp packaging/simple-modern-equalizer.desktop dist/linux/share/applications/
 cp ui/icons/app-icon.png dist/linux/share/icons/hicolor/256x256/apps/simple-modern-equalizer.png
 cp LICENSE THIRD_PARTY_NOTICES.md dist/linux/
-cp ui/fonts/OFL.txt dist/linux/IBM-Plex-Mono-OFL.txt
+cp ui/fonts/OFL.txt dist/linux/Inter-OFL.txt
 printf '%s\n' 'Staged dist/linux. Requires the desktop system PipeWire service.'

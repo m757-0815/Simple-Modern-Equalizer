@@ -18,7 +18,7 @@ pub fn clipping_controls(regions: &[(f32, f32)]) -> [bool; 3] {
     })
 }
 
-#[derive(Default, Deserialize, Serialize)]
+#[derive(Clone, Default, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
 pub struct SimpleSettings {
     pub active: bool,
@@ -26,10 +26,15 @@ pub struct SimpleSettings {
     pub mid: f32,
     pub treble: f32,
     pub loudness: bool,
+    pub preamp_db: f64,
 }
 
 impl SimpleSettings {
-    pub fn config(&self, bypass: bool, auto_headroom: bool) -> Config {
+    pub fn manual_preamp(&self) -> f64 {
+        self.preamp_db.clamp(-crate::config::MANUAL_PREAMP_LIMIT_DB, crate::config::MANUAL_PREAMP_LIMIT_DB)
+    }
+
+    pub fn config(&self, bypass: bool, auto_headroom: bool, balance: f64) -> Config {
         let mut bands = vec![
             tone("LS", BASS_HZ, self.bass.clamp(-12.0, 12.0).into(), 0.707),
             tone("PK", MID_HZ, self.mid.clamp(-12.0, 12.0).into(), 0.85),
@@ -45,13 +50,14 @@ impl SimpleSettings {
         let preamp_db = if auto_headroom {
             -bands.iter().map(|band| band.gain_db.max(0.0)).sum::<f64>()
         } else {
-            0.0
+            self.manual_preamp()
         };
         let mut config = Config {
             name: "Simple".into(),
             description: String::new(),
             preamp_db,
             bypass,
+            balance,
             show_live_view: false,
             bands,
             ..Config::default()
@@ -84,16 +90,16 @@ mod tests {
     #[test]
     fn loudness_adds_shelves_and_reserves_headroom_at_maximum_boost() {
         let mut controls = SimpleSettings { bass: 12.0, mid: 12.0, treble: 12.0, ..SimpleSettings::default() };
-        let off = controls.config(false, true);
+        let off = controls.config(false, true, 0.0);
         controls.loudness = true;
-        let on = controls.config(false, true);
+        let on = controls.config(false, true, 0.0);
         assert!(off.bands.iter().all(|band| on.bands.contains(band)));
         assert_eq!(on.bands[1].kind, "LS");
         assert_eq!(on.bands[4].kind, "HS");
         assert_eq!(on.preamp_db, -43.5);
         assert!(on.validate().is_ok());
-        assert!(controls.config(true, true).bypass);
-        let without_headroom = controls.config(false, false);
+        assert!(controls.config(true, true, 0.0).bypass);
+        let without_headroom = controls.config(false, false, 0.0);
         assert_eq!(without_headroom.preamp_db, 0.0);
         assert_eq!(without_headroom.bands, on.bands);
     }

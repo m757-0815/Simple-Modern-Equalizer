@@ -15,8 +15,11 @@ fn response(cfg: &Config, sample_rate: f64, channels: usize) -> (f64, f64) {
         let step = f64::from(i) / 64.0;
         [20.0 * step * step, max_audible + (nyquist - max_audible) * step]
     });
+    let correction = cfg.spline_correction();
+    let spline_points = if correction.iter().any(|point| point.gain_db != 0.0) { correction.as_ref() } else { &[] };
     let critical = edges.chain(
-        cfg.bands.iter().filter(|band| band.enabled && band.frequency_hz < nyquist)
+        cfg.parametric_bands().iter().chain(spline_points)
+            .filter(|band| band.enabled && band.frequency_hz < nyquist)
             .map(|band| band.frequency_hz),
     );
     let points = cfg.response(audible.chain(critical), sample_rate);
@@ -45,8 +48,8 @@ pub fn prepare(
     }
     let metrics = |cfg: &mut Config| {
         let (peak, average) = response(cfg, sample_rate, channels);
-        if auto_headroom && !cfg.bypass && cfg.preamp_db + peak > -0.2 {
-            cfg.preamp_db = (-peak - 0.2).max(-60.0);
+        if auto_headroom && !cfg.bypass {
+            cfg.preamp_db = (-peak - 0.2).clamp(-60.0, 0.0);
         }
         (peak, average)
     };
@@ -75,7 +78,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn auto_headroom_accounts_for_stacked_filters_and_keeps_manual_cuts() {
+    fn auto_headroom_accounts_for_stacked_filters_and_replaces_manual_gain() {
         let mut cfg = Config::default();
         for band in cfg.bands.iter_mut().take(2) {
             band.frequency_hz = 1013.0;
@@ -85,7 +88,9 @@ mod tests {
         let (effective, _) = prepare(&cfg, None, true, 48000.0, 2);
         assert!((effective.preamp_db + 12.2).abs() < 0.01);
         cfg.preamp_db = -18.0;
-        assert_eq!(prepare(&cfg, None, true, 48000.0, 2).0, cfg);
+        assert_eq!(prepare(&cfg, None, true, 48000.0, 2).0.preamp_db, effective.preamp_db);
+        cfg.preamp_db = 6.0;
+        assert_eq!(prepare(&cfg, None, true, 48000.0, 2).0.preamp_db, effective.preamp_db);
         cfg.bypass = true;
         assert_eq!(prepare(&cfg, None, true, 48000.0, 2).0, cfg);
     }

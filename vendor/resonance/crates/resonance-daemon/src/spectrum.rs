@@ -122,12 +122,16 @@ pub async fn run(mut rx: rtrb::Consumer<f32>, state: SharedState) {
     let mut write_pos: usize = 0;
     let mut env = SpectrumEnvelope::new();
 
-    // Reused across iterations so the 40 Hz loop never allocates.
+    // Reuse buffers for both the capture drain and the slower FFT.
     let mut fft_buf: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); FFT_SIZE];
     let mut half_mags: Vec<f32> = vec![0.0; FFT_SIZE / 2];
     let mut drained: Vec<f32> = Vec::with_capacity(8192);
 
-    let mut interval = tokio::time::interval(Duration::from_millis(25)); // ~40 fps
+    let analysis_interval = Duration::from_millis(25);
+    let mut next_analysis = tokio::time::Instant::now();
+    let mut received_samples = false;
+    let mut interval = tokio::time::interval(Duration::from_millis(8));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
         interval.tick().await;
@@ -142,7 +146,7 @@ pub async fn run(mut rx: rtrb::Consumer<f32>, state: SharedState) {
                 drained.push(s);
             }
         }
-        env.note_feed(available > 0);
+        received_samples |= !drained.is_empty();
 
         // Mirror the fresh samples into the rolling capture buffer that backs
         // `CaptureOutput` (the `resonance verify` harness). One lock per tick.
@@ -157,6 +161,12 @@ pub async fn run(mut rx: rtrb::Consumer<f32>, state: SharedState) {
             }
         }
 
+        let now = tokio::time::Instant::now();
+        if now < next_analysis {
+            continue;
+        }
+        next_analysis = (next_analysis + analysis_interval).max(now);
+        env.note_feed(std::mem::take(&mut received_samples));
         if write_pos < FFT_SIZE {
             continue;
         }

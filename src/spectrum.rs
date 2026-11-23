@@ -1,12 +1,12 @@
 use rustfft::{Fft, FftPlanner, num_complex::Complex32};
 use std::sync::Arc;
 
-const STANDARD_BINS: usize = 128;
+pub const STANDARD_BINS: usize = 128;
 const DETAILED_BINS: usize = 512;
 const FFT_LENGTH: usize = 8192;
 const MIN_DB: f32 = -66.0;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Resolution {
     Standard,
     Detailed,
@@ -27,6 +27,10 @@ pub struct Levels {
 }
 
 impl Levels {
+    pub fn silent(resolution: Resolution) -> Self {
+        Self { values: [0.0; DETAILED_BINS], resolution }
+    }
+
     pub fn as_slice(&self) -> &[f32] {
         &self.values[..self.resolution.bins()]
     }

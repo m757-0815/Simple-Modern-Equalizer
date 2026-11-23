@@ -334,6 +334,8 @@ pub enum Command {
     /// copy, so the next audio is processed exactly like an offline render of
     /// that file from its first sample. Append-only (see note above).
     ResetAndExportChain { path: String },
+    /// Capture synchronized front-channel audio around the processing chain.
+    CaptureMonitor { frames: u16 },
 }
 
 /// Per-band audition mode (mirrors `resonance_dsp::chain::AuditionMode`).
@@ -632,11 +634,12 @@ pub enum Response {
     /// samples were produced at, plus the freshest mono samples oldest-first.
     /// May be shorter than requested while the buffer is still filling; empty
     /// on platforms where the daemon owns no audio path (Windows/APO).
-    /// Appended LAST — postcard encodes variants by ordinal (see `Command`).
     Capture {
         rate: f64,
         samples: Vec<f32>,
     },
+    /// Oldest first, with each frame ordered input L/R, output L/R.
+    MonitorCapture { rate: u32, frames: Vec<[f32; 4]> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -36,7 +36,7 @@
           <File Source="$(var.StageDir)\THIRD_PARTY_NOTICES.md" KeyPath="yes" />
         </Component>
         <Component Id="GraphFontLicense" Guid="*">
-          <File Source="$(var.StageDir)\IBM-Plex-Mono-OFL.txt" KeyPath="yes" />
+          <File Source="$(var.StageDir)\Inter-OFL.txt" KeyPath="yes" />
         </Component>
       </Directory>
     </StandardDirectory>

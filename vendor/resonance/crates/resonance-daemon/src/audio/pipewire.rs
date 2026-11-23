@@ -227,6 +227,7 @@ struct FilterData {
     chain: ProcessorChain,
     cmd_rx: rtrb::Consumer<AudioCommand>,
     spectrum_tx: rtrb::Producer<f32>,
+    monitor: crate::monitor::Tap,
     /// Reusable interleaved f64 scratch buffer — avoids allocating every RT callback.
     scratch: Vec<f64>,
     /// Second interleaved scratch for the routing matrix output (square remap).
@@ -254,6 +255,7 @@ pub fn spawn(ctx: super::BackendCtx) -> Result<JoinHandle<()>> {
     let super::BackendCtx {
         cmd_rx,
         spectrum_tx,
+        monitor,
         initial_chain,
         output_tx,
         route_rx,
@@ -279,6 +281,7 @@ pub fn spawn(ctx: super::BackendCtx) -> Result<JoinHandle<()>> {
         chain: initial_chain,
         cmd_rx,
         spectrum_tx,
+        monitor,
         scratch: vec![0.0; MAX_QUANTUM * channels],
         routed: vec![0.0; MAX_QUANTUM * channels],
         meters,
@@ -1893,6 +1896,12 @@ unsafe extern "C" fn filter_process_cb(data: *mut c_void, position: *mut spa_io_
                 }
                 let _ = fd.spectrum_tx.push(acc / channels as f32);
             }
+            let right = usize::from(channels > 1);
+            fd.monitor.record(fd.chain.sample_rate, n, |i| {
+                let left = *outs[0].add(i);
+                let right = *outs[right].add(i);
+                [left, right, left, right]
+            });
             return;
         }
 
@@ -1934,6 +1943,10 @@ unsafe extern "C" fn filter_process_cb(data: *mut c_void, position: *mut spa_io_
         };
         let dt = t0.elapsed();
         let (out_peak, out_rms) = peak_rms(out_buf);
+        let right = usize::from(channels > 1);
+        fd.monitor.record(fd.chain.sample_rate, n, |i| {
+            [*ins[0].add(i), *ins[right].add(i), out_buf[i * channels] as f32, out_buf[i * channels + right] as f32]
+        });
         for i in 0..n {
             for (ch, &outp) in outs[..channels].iter().enumerate() {
                 *outp.add(i) = out_buf[i * channels + ch] as f32;
