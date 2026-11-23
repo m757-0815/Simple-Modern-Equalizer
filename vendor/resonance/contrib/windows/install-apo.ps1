@@ -97,8 +97,8 @@ if ($null -eq (Get-ItemProperty -Path $backupRoot -Name 'DisableProtectedAudioDG
 Set-ItemProperty -Path $audioKey -Name 'DisableProtectedAudioDG' -Value 1 -Type DWord -EA Stop
 
 # --- 4) attach to each render endpoint, ONE slot per endpoint ---
-# Register our chain once per endpoint, preserving other audio effects. When the
-# device exposes a composite list, append to that list in processing order.
+# Register our chain once per endpoint. Prefer the standard effect slot when
+# it is available, including on endpoints that advertise OEM composite lists.
 $renderSub = 'SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Render'
 $render = "HKLM:\$renderSub"
 $fx   = '{D04E05A6-594B-4FB6-A80D-01AF5EED7D1D}'   # PKEY_FX_*  ,1/,2 legacy  ,5/,6/,7 SFX/MFX/EFX
@@ -110,6 +110,7 @@ $combinedName = '{b3f8fa53-0004-438e-9003-51a46e139bfc},41'   # combined-device 
 # and leave DisableProtectedAudioDG on (and lose the driver's original SFX/MFX entries): keep
 # any backup that already exists and only record what is still missing.
 $allSlots = '1','2','5','6','7'
+$compositeSlots = '13','14','15'
 
 $attached = 0
 $verified = 0
@@ -144,20 +145,29 @@ Get-ChildItem $render -EA SilentlyContinue | ForEach-Object {
 
     $key = Get-Item -LiteralPath $fxp -EA Stop
     $combined = $null -ne (Get-ItemProperty -Path "$render\$g\Properties" -Name $combinedName -EA SilentlyContinue).$combinedName
-    $slot = if ($combined) { '6' } else { '7' }
-    $composite = if ($combined) { '14' } else { '15' }
-    $isComposite = $key.GetValueNames() -contains "$fx,$composite"
-    if ($isComposite) {
+    $legacy = $key.GetValue("$fx,1") -or $key.GetValue("$fx,2")
+    $modern = $key.GetValue("$fx,5") -or $key.GetValue("$fx,6") -or $key.GetValue("$fx,7") -or
+      $key.GetValue("$fx,13") -or $key.GetValue("$fx,14") -or $key.GetValue("$fx,15")
+    $slot = if ($legacy -and -not $modern) { '2' } elseif ($combined) { '6' } else { '7' }
+    $name = "$fx,$slot"
+    $existing = $key.GetValue($name)
+    $composite = if ($slot -eq '6') { '14' } else { '15' }
+    if ($slot -ne '2' -and $existing -and $existing -ne $clsid -and $key.GetValueNames() -contains "$fx,$composite") {
       # Keep the device manufacturer's effects in their original order.
       $name = "$fx,$composite"
       $effects = @($key.GetValue($name) | Where-Object { $_ -ne $clsid })
       New-ItemProperty -Force -Path $fxp -Name $name -PropertyType MultiString -Value ([string[]]($effects + $clsid)) -EA Stop | Out-Null
     } else {
-      $legacy = $key.GetValue("$fx,1") -or $key.GetValue("$fx,2")
-      $modern = $key.GetValue("$fx,5") -or $key.GetValue("$fx,6") -or $key.GetValue("$fx,7")
-      if ($legacy -and -not $modern) { $slot = '2' }
-      $name = "$fx,$slot"
-      Set-ItemProperty -Path $fxp -Name $name -Value $clsid -EA Stop
+      New-ItemProperty -Force -Path $fxp -Name $name -PropertyType String -Value $clsid -EA Stop | Out-Null
+    }
+    foreach ($old in $compositeSlots) {
+      $oldName = "$fx,$old"
+      if ($oldName -eq $name) { continue }
+      $effects = @($key.GetValue($oldName))
+      if ($effects -contains $clsid) {
+        $remaining = [string[]]@($effects | Where-Object { $_ -ne $clsid })
+        New-ItemProperty -Force -Path $fxp -Name $oldName -PropertyType MultiString -Value $remaining -EA Stop | Out-Null
+      }
     }
     foreach ($old in $allSlots) {
       if ("$fx,$old" -ne $name -and $key.GetValue("$fx,$old") -eq $clsid) {

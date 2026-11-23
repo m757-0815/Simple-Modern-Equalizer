@@ -637,11 +637,12 @@ mod tests {
         assert!(!final_state.bands[2].enabled);
         assert_eq!(final_state.routing.as_ref().unwrap().gains[0], 0.75);
 
-        let tones = crate::simple::SimpleSettings { bass: 6.0, ..Default::default() }.config(false, true);
+        let tones = crate::simple::SimpleSettings { bass: 6.0, ..Default::default() }
+            .config(false, true, edited.balance);
         apply(&mut stream, Some(&edited), &tones);
         let Response::State(simple) = exchange(&mut stream, Command::GetState) else { panic!("missing Simple state"); };
         assert_eq!(simple.bands, tones.bands.iter().map(crate::config::Band::state).collect::<Vec<_>>());
-        assert!(simple.routing.is_none());
+        assert_eq!(simple.routing, final_state.routing);
 
         apply(&mut stream, Some(&tones), &edited);
         let Response::State(restored) = exchange(&mut stream, Command::GetState) else { panic!("missing restored Standard state"); };
