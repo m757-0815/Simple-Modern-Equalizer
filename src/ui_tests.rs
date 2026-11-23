@@ -1,4 +1,4 @@
-use crate::{BandRow, MainWindow, ToneClipping};
+use crate::{BandRow, GraphDot, MainWindow, ToneClipping};
 use i_slint_backend_testing::{AccessibleRole, ElementHandle};
 use slint::{ComponentHandle, LogicalPosition, LogicalSize, Model, SharedString, VecModel, platform::{Key, PointerEventButton, WindowEvent}};
 use std::{cell::{Cell, RefCell}, rc::Rc};
@@ -212,6 +212,25 @@ fn simple_auto_headroom_stays_in_place_when_toggled() {
 }
 
 #[test]
+fn compact_simple_tones_keep_the_same_preamp_and_balance_panel() {
+    let ui = window();
+    ui.set_show_live_view(false);
+    ui.window().set_size(LogicalSize::new(860.0, 940.0));
+    ui.show().unwrap();
+    let levels = || ElementHandle::find_by_element_id(&ui, "MainWindow::levels-panel").next().unwrap();
+    let standard_size = levels().size();
+    ui.set_simple_layout(true);
+    let tones = ElementHandle::find_by_element_id(&ui, "MainWindow::tone-panel").next().unwrap();
+    assert!(tones.size().height <= 300.0);
+    assert_eq!(levels().size(), standard_size);
+    for label in ["Bass", "Mid", "Treble"] {
+        let slider = element(&ui, label, AccessibleRole::Slider);
+        assert_eq!(slider.size().height, 146.0);
+        assert!(slider.absolute_position().y + slider.size().height < levels().absolute_position().y);
+    }
+}
+
+#[test]
 fn band_toggle_does_not_submit_uncommitted_number_fields() {
     let ui = window();
     ui.set_bands(Rc::new(VecModel::from(vec![BandRow {
@@ -296,6 +315,14 @@ fn preamp_spinbox_steps_by_005_and_auto_headroom_locks_controls() {
 fn graph_continues_dragging_the_renumbered_band() {
     let ui = window();
     ui.set_show_live_view(false);
+    let bands = VecModel::from((0..3).map(|index| BandRow {
+        frequency: format!("{}.0", 100 * (index + 1)).into(),
+        gain_label: "+0.0 dB".into(),
+        enabled: true,
+        ..BandRow::default()
+    }).collect::<Vec<_>>());
+    ui.set_bands(Rc::new(bands).into());
+    ui.set_graph_dots(Rc::new(VecModel::from(vec![GraphDot { x: 0.6, y: 0.5, enabled: true }; 3])).into());
     ui.on_hit_band(|_, _, _, _| 0);
     let moves = Rc::new(RefCell::new(Vec::new()));
     let captured = moves.clone();
@@ -309,14 +336,27 @@ fn graph_continues_dragging_the_renumbered_band() {
     let y = point.y + plot.size().height / 2.0;
     let start = LogicalPosition::new(point.x + 40.0, y);
     ui.window().dispatch_event(WindowEvent::PointerPressed { position: start, button: PointerEventButton::Left });
-    for offset in [180.0, 260.0] {
-        let position = LogicalPosition::new(start.x + offset, y);
-        ui.window().dispatch_event(WindowEvent::PointerMoved { position });
-    }
+    assert_eq!(ui.get_selected_point(), 0);
+    ui.window().dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(start.x + 180.0, y) });
+    ui.window().dispatch_event(WindowEvent::KeyPressed { text: Key::Shift.into() });
+    let end = LogicalPosition::new(start.x + 260.0, y - 25.0);
+    ui.window().dispatch_event(WindowEvent::PointerMoved { position: end });
+    ui.window().dispatch_event(WindowEvent::KeyReleased { text: Key::Shift.into() });
+    ui.window().dispatch_event(WindowEvent::PointerReleased { position: end, button: PointerEventButton::Left });
     let moves = moves.borrow();
     assert_eq!(moves.len(), 2);
     assert_eq!((moves[0].0, moves[1].0), (0, 2));
-    assert!(moves[1].1 > moves[0].1 && moves.iter().all(|action| action.2 == 0.0));
+    assert!(((moves[1].1 - moves[0].1) * plot.size().width - 16.0).abs() < 0.01);
+    assert!((moves[1].2 * plot.size().height + 5.0).abs() < 0.01);
+    assert_eq!(ui.get_selected_point(), 2);
+    assert!(ElementHandle::find_by_accessible_label(&ui, "300.0 Hz · +0.0 dB").next().is_some());
+    let row = element(&ui, "Select EQ Point 3", AccessibleRole::Button);
+    assert_eq!(row.accessible_checked(), Some(true));
+    element(&ui, "Select EQ Point 2", AccessibleRole::Button).invoke_accessible_default_action();
+    assert_eq!(ui.get_selected_point(), 1);
+    assert!(ElementHandle::find_by_accessible_label(&ui, "200.0 Hz · +0.0 dB").next().is_some());
+    ui.invoke_clear_point_selection();
+    assert_eq!(ui.get_selected_point(), -1);
 }
 
 #[test]
@@ -886,6 +926,95 @@ fn navigation_stays_compact_after_window_resize_and_restore() {
             assert_eq!(ui.get_balance(), 0.25);
         }
     }
+}
+
+#[test]
+fn tiled_and_portrait_windows_keep_navigation_and_power_in_view() {
+    let ui = window();
+    ui.show().unwrap();
+    for (width, height) in [(960.0, 540.0), (1366.0, 384.0), (683.0, 384.0), (540.0, 960.0),
+        (540.0, 1920.0), (720.0, 1280.0), (480.0, 360.0)]
+    {
+        ui.window().set_size(LogicalSize::new(width, height));
+        for simple in [false, true] {
+            ui.set_simple_layout(simple);
+            for label in ["Simple", "Standard", "Undo", "Settings", "Select Preset", "Enable Equalizer"] {
+                let control = element(&ui, label, AccessibleRole::Button);
+                let position = control.absolute_position();
+                let size = control.size();
+                assert!(position.x >= 0.0 && position.x + size.width <= width,
+                    "{label} overflows at {width}×{height}, Simple={simple}");
+                assert!(position.y >= 0.0 && position.y + size.height <= height);
+            }
+            assert_eq!(ui.get_live_monitor_expanded(), height >= 500.0);
+            if !simple && height < 500.0 {
+                let plot = ElementHandle::find_by_element_id(&ui, "MainWindow::plot").next().unwrap();
+                assert!(plot.absolute_position().y + plot.size().height <= height);
+            }
+        }
+    }
+    let expand = element(&ui, "Expand Live Monitor", AccessibleRole::Button);
+    expand.invoke_accessible_default_action();
+    assert!(ui.get_live_monitor_expanded());
+    element(&ui, "Collapse Live Monitor", AccessibleRole::Button).invoke_accessible_default_action();
+    assert!(!ui.get_live_monitor_expanded());
+    ui.window().set_size(LogicalSize::new(540.0, 960.0));
+    assert!(ui.get_live_monitor_expanded());
+}
+
+#[test]
+fn narrow_layout_stacks_levels_and_parametric_band_controls() {
+    let ui = window();
+    ui.set_show_live_view(false);
+    ui.set_bands(Rc::new(VecModel::from(vec![BandRow { frequency: "1000.0".into(), enabled: true,
+        q: "0.7".into(), gain_label: "+0.0 dB".into(), ..BandRow::default() }])).into());
+    ui.window().set_size(LogicalSize::new(540.0, 960.0));
+    ui.show().unwrap();
+
+    let frequency = element(&ui, "Band 1 frequency", AccessibleRole::TextInput);
+    let q = element(&ui, "Band 1 Q", AccessibleRole::TextInput);
+    let gain = element(&ui, "Band 1 gain", AccessibleRole::Slider);
+    let delete = element(&ui, "Delete band 1", AccessibleRole::Button);
+    assert!(q.absolute_position().y > frequency.absolute_position().y + frequency.size().height);
+    assert!(gain.size().width > 100.0);
+    for control in [q, gain, delete] {
+        assert!(control.absolute_position().x + control.size().width <= 540.0);
+    }
+    for simple in [false, true] {
+        ui.set_simple_layout(simple);
+        let preamp = element(&ui, "Preamp", AccessibleRole::Slider);
+        let balance = element(&ui, "Balance", AccessibleRole::Slider);
+        assert!(balance.absolute_position().y >= preamp.absolute_position().y + preamp.size().height);
+        assert!(balance.size().width > 100.0);
+    }
+}
+
+#[test]
+fn settings_and_preset_popups_fit_and_scroll_on_a_short_tile() {
+    let ui = window();
+    ui.set_has_login_start(true);
+    ui.set_presets(Rc::new(VecModel::from((1..=15).map(|i| SharedString::from(format!("Preset {i}")))
+        .collect::<Vec<_>>())).into());
+    ui.window().set_size(LogicalSize::new(683.0, 384.0));
+    ui.show().unwrap();
+
+    open_settings(&ui);
+    let head = element(&ui, "Live Monitor", AccessibleRole::Checkbox);
+    assert!(head.absolute_position().y >= 0.0);
+    head.scroll(0.0, -1000.0);
+    i_slint_backend_testing::mock_elapsed_time(std::time::Duration::from_millis(250));
+    let about = element(&ui, "About", AccessibleRole::Button);
+    assert!(about.absolute_position().y + about.size().height <= 384.0);
+    about.invoke_accessible_default_action();
+    element(&ui, "Close", AccessibleRole::Button).invoke_accessible_default_action();
+
+    element(&ui, "Select Preset", AccessibleRole::Button).invoke_accessible_default_action();
+    let import = element(&ui, "Import Equalizer APO", AccessibleRole::Button);
+    assert!(import.absolute_position().y >= 0.0);
+    assert!(import.absolute_position().y + import.size().height <= 384.0);
+    element(&ui, "Preset 1 (selected)", AccessibleRole::Button).scroll(0.0, -1000.0);
+    i_slint_backend_testing::mock_elapsed_time(std::time::Duration::from_millis(250));
+    assert!(ElementHandle::find_by_accessible_label(&ui, "Preset 15").next().is_some());
 }
 
 #[test]
