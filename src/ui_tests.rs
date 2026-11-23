@@ -594,7 +594,7 @@ fn standard_controls_switch_eq_editors_in_both_directions() {
         ui.set_spline_eq(!ui.get_spline_eq());
     });
     ui.show().unwrap();
-    for title in ["Preamp & Balance", "Equalizer Points"] {
+    for title in ["Preamp & Balance", "EQ Bands"] {
         assert!(ElementHandle::find_by_accessible_label(&ui, title).next().is_some(), "{title}");
     }
     let title = ElementHandle::find_by_accessible_label(&ui, "Equalizer Graph").next().unwrap();
@@ -604,11 +604,15 @@ fn standard_controls_switch_eq_editors_in_both_directions() {
     assert!(button.absolute_position().x < 275.0);
     let center = |control: &ElementHandle| control.absolute_position().y + control.size().height / 2.0;
     assert!((center(&title) - center(&button)).abs() < 2.0);
-    for controls in ["EQ Graph", "EQ Bands"] {
-        element(&ui, &format!("Use Spline From {controls}"), AccessibleRole::Button).invoke_accessible_default_action();
+    for (from, back) in [("EQ Graph", "EQ Graph"), ("EQ Bands", "Spline Points")] {
+        element(&ui, &format!("Use Spline From {from}"), AccessibleRole::Button).invoke_accessible_default_action();
         assert!(ui.get_spline_eq());
-        element(&ui, &format!("Use Parametric From {controls}"), AccessibleRole::Button).invoke_accessible_default_action();
+        assert!(ElementHandle::find_by_accessible_label(&ui, "Spline Points").next().is_some());
+        assert!(ElementHandle::find_by_accessible_label(&ui, "EQ Bands").next().is_none());
+        element(&ui, &format!("Use Parametric From {back}"), AccessibleRole::Button).invoke_accessible_default_action();
         assert!(!ui.get_spline_eq());
+        assert!(ElementHandle::find_by_accessible_label(&ui, "EQ Bands").next().is_some());
+        assert!(ElementHandle::find_by_accessible_label(&ui, "Spline Points").next().is_none());
     }
     assert!(ElementHandle::find_by_accessible_label(&ui, "Use Spline").next().is_none());
     open_settings(&ui);
