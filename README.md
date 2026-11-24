@@ -24,7 +24,7 @@ AppImages built on Fedora 44 require glibc 2.43 or later. On Fedora 44, you can 
 ## How to use it
 
 - **Simple** gives you Bass, Mid, Treble, and Loudness. Double-click a lever to reset it. Both modes share **Preamp & Balance**. Enabling **Auto Headroom** replaces the manual preamp gain with a calculated value.
-- **Standard** lets you drag EQ handles, hold **Shift** for fine adjustment, and double-click to add a handle. Right-click a band or interior spline point to remove it. **Use Spline** and **Use Parametric** fit the same reference curve. **Undo** keeps the last 15 EQ actions.
+- **Standard** lets you drag EQ handles, hold **Shift** for fine adjustment, and double-click to add a handle. Right-click a band or interior spline point to remove it. **Use Spline** and **Use Parametric** fit the same reference curve. **Optimizing EQ curve…** appears while a fit runs. **Undo** keeps the last 15 EQ actions.
 - **Select Preset** saves tuning, links presets to an audio output, and imports Equalizer APO `.txt` files. Loading or importing asks before replacing unsaved EQ changes.
 - **Live Monitor** offers six views, including Before / After EQ on PipeWire. Use **Settings** to choose an output or enable **Start on login** on Linux. [Settings screenshot](docs/screenshots/settings.png)
 
