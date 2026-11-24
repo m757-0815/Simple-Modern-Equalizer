@@ -8,7 +8,20 @@ System-wide EQ for Linux and Windows with tone controls, editable curves, headph
 
 ## Install
 
-Download a package from a **Build installers** run in GitHub Actions. Local builds are in `dist/`. [Build workflow](.github/workflows/package.yml)
+### Downloads
+
+The v0.1.15 downloads are GitHub Actions ZIP artifacts. Sign in to GitHub to download them, then extract the package. [Build installers runs](https://github.com/m757-0815/Simple-Modern-Equalizer/actions/workflows/package.yml)
+
+| Target | Package |
+| --- | --- |
+| Windows x86-64 MSI | [Download Windows build](https://github.com/m757-0815/Simple-Modern-Equalizer/actions/runs/45378075492/artifacts/14913157219) |
+| Linux x86-64 AppImage | [Download AppImage](https://github.com/m757-0815/Simple-Modern-Equalizer/actions/runs/45378075492/artifacts/14913266153) |
+| Fedora 44 x86-64 RPM | [Download Fedora RPM](https://github.com/m757-0815/Simple-Modern-Equalizer/actions/runs/45378075492/artifacts/14911689092) |
+| Ubuntu 24.04 x86-64 DEB | [Ubuntu build script](scripts/build-deb.sh) |
+| Debian 13 x86-64 DEB | [Debian build script](scripts/build-deb.sh) |
+| Source | [Download source archive](https://github.com/m757-0815/Simple-Modern-Equalizer/actions/runs/45378075492/artifacts/14912721672) |
+
+The Ubuntu and Debian jobs are available in **Build installers**. Local builds are in `dist/`.
 
 **Linux.** The x86-64 AppImage needs a running PipeWire session. Launch it from the folder containing the AppImage.
 
@@ -19,7 +32,7 @@ chmod +x Simple-Modern-Equalizer-x86_64.AppImage
 
 AppImages built on Fedora 44 require glibc 2.43 or later.
 
-**Ubuntu 24.04 and Debian 13.** Download the x86-64 `.deb` for your distribution. Run `sudo apt install ./FILE.deb` with its filename, then launch **Simple Modern Equalizer** from the application menu.
+**Ubuntu 24.04 and Debian 13.** Build the x86-64 `.deb` for your distribution or get it from a completed **Build installers** run. Run `sudo apt install ./FILE.deb` with its filename, then launch **Simple Modern Equalizer** from the application menu.
 
 **Fedora 44.** Run `sudo dnf install ./FILE.rpm` with the RPM filename, then launch `simple-modern-equalizer`.
 
@@ -44,10 +57,10 @@ sh scripts/build-linux.sh
 
 | Package | Build command |
 | --- | --- |
-| Linux AppImage | `sh scripts/build-appimage.sh` |
-| Ubuntu or Debian package | `sh scripts/build-deb.sh` on the target distribution |
-| Fedora RPM | `sh scripts/build-fedora.sh` |
-| Windows MSI | `./scripts/build-windows.ps1` |
+| [Linux AppImage](scripts/build-appimage.sh) | `sh scripts/build-appimage.sh` |
+| [Ubuntu or Debian package](scripts/build-deb.sh) | `sh scripts/build-deb.sh` on the target distribution |
+| [Fedora RPM](scripts/build-fedora.sh) | `sh scripts/build-fedora.sh` |
+| [Windows MSI](scripts/build-windows.ps1) | `./scripts/build-windows.ps1` |
 
 Windows builds need MSVC, a Windows SDK, and WiX 4 with its Util extension. Enable EQ and pause playback before running the Windows audio check. [Audio check script](scripts/test-windows-audio.ps1)
 
