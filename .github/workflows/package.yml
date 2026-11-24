@@ -71,6 +71,46 @@ jobs:
           path: dist/*.rpm
           if-no-files-found: error
 
+  deb:
+    name: Build .deb for ${{ matrix.platform }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: ubuntu:24.04
+            platform: Ubuntu-24.04
+          - image: debian:13
+            platform: Debian-13
+    container: ${{ matrix.image }}
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      - name: Install build dependencies and rustup
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential ca-certificates clang curl desktop-file-utils dpkg-dev git libclang-dev \
+            libegl-dev libfontconfig-dev libgl-dev libpipewire-0.3-dev libspa-0.2-dev \
+            libudev-dev libxkbcommon-dev pkg-config python3
+          curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - uses: actions/checkout@v4
+      - name: Build and check Debian package
+        run: |
+          rustup show
+          sh scripts/build-deb.sh
+          dpkg-deb --contents dist/*.deb
+          apt-get install -y --no-install-recommends ./dist/*.deb
+          test -x /usr/bin/simple-modern-equalizer
+          test -x /usr/lib/simple-modern-equalizer/resonanced
+          test -s /usr/share/icons/hicolor/256x256/apps/simple-modern-equalizer.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Simple-Modern-Equalizer-${{ matrix.platform }}-amd64
+          path: dist/*.deb
+          if-no-files-found: error
+
   source:
     runs-on: ubuntu-24.04
     steps:

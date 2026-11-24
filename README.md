@@ -17,7 +17,11 @@ chmod +x Simple-Modern-Equalizer-x86_64.AppImage
 ./Simple-Modern-Equalizer-x86_64.AppImage
 ```
 
-AppImages built on Fedora 44 require glibc 2.43 or later. On Fedora 44, you can install the RPM with `sudo dnf install ./FILE.rpm` using its filename, then launch `simple-modern-equalizer`.
+AppImages built on Fedora 44 require glibc 2.43 or later.
+
+**Ubuntu 24.04 and Debian 13.** Download the x86-64 `.deb` for your distribution. Run `sudo apt install ./FILE.deb` with its filename, then launch **Simple Modern Equalizer** from the application menu.
+
+**Fedora 44.** Run `sudo dnf install ./FILE.rpm` with the RPM filename, then launch `simple-modern-equalizer`.
 
 **Windows.** Run `SimpleModernEqualizer-Setup-x64.msi` and open the app from Start. Uninstall Resonance first. The development MSI registers an unsigned audio component, sets `DisableProtectedAudioDG`, and restarts Windows Audio.
 
@@ -41,6 +45,7 @@ sh scripts/build-linux.sh
 | Package | Build command |
 | --- | --- |
 | Linux AppImage | `sh scripts/build-appimage.sh` |
+| Ubuntu or Debian package | `sh scripts/build-deb.sh` on the target distribution |
 | Fedora RPM | `sh scripts/build-fedora.sh` |
 | Windows MSI | `./scripts/build-windows.ps1` |
 
