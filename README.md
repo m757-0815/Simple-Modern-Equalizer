@@ -1,62 +1,51 @@
 # Simple Modern Equalizer
 
-A system-wide equalizer for Linux and Windows with tone controls, editable EQ curves, headphone presets, and live audio meters.
+System-wide EQ for Linux and Windows with tone controls, editable curves, headphone presets, and live audio monitoring.
 
-## Install and start
+| Standard · Before / After EQ | Simple · Oscilloscope |
+| --- | --- |
+| [![Standard mode with three EQ bands and Before / After EQ](docs/screenshots/standard.png)](docs/screenshots/standard.png) | [![Simple mode with Bass, Mid, Treble, and Oscilloscope](docs/screenshots/simple.png)](docs/screenshots/simple.png) |
 
-On Linux, use an x86-64 build and a running PipeWire session. From the repository root, launch the local AppImage:
+## Install
 
-```sh
-chmod +x dist/Simple-Modern-Equalizer-x86_64.AppImage
-./dist/Simple-Modern-Equalizer-x86_64.AppImage
-```
+Download a package from a **Build installers** run in GitHub Actions. Local builds are in `dist/`. [Build workflow](.github/workflows/package.yml)
 
-If you downloaded the AppImage, use its download path. The AppImage built on Fedora 44 requires glibc 2.43 or newer.
-
-On Fedora 44, you can install the RPM instead and launch the app from the menu:
+**Linux.** The x86-64 AppImage needs a running PipeWire session. Launch it from the folder containing the AppImage.
 
 ```sh
-sudo dnf install ./dist/simple-modern-equalizer-*.rpm
-simple-modern-equalizer
+chmod +x Simple-Modern-Equalizer-x86_64.AppImage
+./Simple-Modern-Equalizer-x86_64.AppImage
 ```
 
-On Windows, run the MSI and open **Simple Modern Equalizer** from the Start menu. The development installer registers an unsigned audio component, sets `DisableProtectedAudioDG`, and restarts Windows Audio. It shares a component ID with Resonance and cannot be installed alongside it.
+AppImages built on Fedora 44 require glibc 2.43 or later. On Fedora 44, you can install the RPM with `sudo dnf install ./FILE.rpm` using its filename, then launch `simple-modern-equalizer`.
 
-![Standard mode with a live spectrum and editable EQ curve](docs/screenshots/standard.png)
+**Windows.** Run `SimpleModernEqualizer-Setup-x64.msi` and open the app from Start. Uninstall Resonance first. The development MSI registers an unsigned audio component, sets `DisableProtectedAudioDG`, and restarts Windows Audio.
 
-## Use the equalizer
+## How to use it
 
-- **Simple** has Bass, Mid, Treble, Loudness, and its own saved preamp. Both views use the same **Preamp & Balance** panel and balance setting. Double-click a tone lever to reset it.
-- **Standard** has parametric bands and cubic spline points. Select a point to see its frequency and gain. Drag to edit, hold **Shift** for fine adjustment, or double-click to add a point. A minimum gap keeps spline points selectable. **Use Spline** and **Use Parametric** fit the same reference curve with up to 32 points or bands. Editing the curve sets a new reference.
-- **Undo** restores the last 15 EQ actions. Each drag counts once.
-- **Select Preset** lets you load, save, rename, or overwrite presets and link them to an audio output. **Import Equalizer APO** saves a supported `.txt` file as a custom preset and opens it in Standard.
-- **Settings** controls output, accent color, and panel visibility. **Live Monitor** targets the display’s refresh rate up to 240 Hz and includes Before / After EQ (PipeWire), 30 seconds of output RMS history, and a Stereo Field with phase correlation.
-- **Settings → Start on login** opens the app when you sign in on Linux. If you move the AppImage, toggle the setting off and back on from its new location.
+- **Simple** gives you Bass, Mid, Treble, and Loudness. Double-click a lever to reset it. Both modes share **Preamp & Balance**. Enabling **Auto Headroom** replaces the manual preamp gain with a calculated value.
+- **Standard** lets you drag EQ handles, hold **Shift** for fine adjustment, and double-click to add a handle. Right-click a band or interior spline point to remove it. **Use Spline** and **Use Parametric** fit the same reference curve. **Undo** keeps the last 15 EQ actions.
+- **Select Preset** saves tuning, links presets to an audio output, and imports Equalizer APO `.txt` files. Loading or importing asks before replacing unsaved EQ changes.
+- **Live Monitor** offers six views, including Before / After EQ on PipeWire. Use **Settings** to choose an output or enable **Start on login** on Linux. [Settings screenshot](docs/screenshots/settings.png)
 
-The **Equalizer On Off** box below the toolbar toggles EQ and balance and stays visible while scrolling in Simple. **Auto Headroom** replaces the manual preamp with a calculated gain. Turning it off keeps that gain within the manual range.
+## Developer
 
-The layout adapts down to 480×360 logical pixels. On short windows, **Show Live Monitor** is beside the power box.
+Use the pinned Rust toolchain and install the platform dependencies listed in the build workflow. The app uses a Slint UI and the vendored Resonance audio engine. [Toolchain](rust-toolchain.toml) · [Build workflow](.github/workflows/package.yml) · [UI](ui/main.slint) · [Engine](vendor/resonance)
 
-## Build and test
-
-Use the pinned Rust toolchain, then run `cargo test --locked`. For Linux packaging, install the PipeWire development headers, Clang, and the desktop dependencies listed in the [build workflow](.github/workflows/package.yml).
+```sh
+cargo test --locked -j 2
+sh scripts/build-linux.sh
+./dist/linux/simple-modern-equalizer
+```
 
 | Package | Build command |
 | --- | --- |
 | Linux AppImage | `sh scripts/build-appimage.sh` |
 | Fedora RPM | `sh scripts/build-fedora.sh` |
-| Windows MSI | `./scripts/build-windows.ps1` in PowerShell with MSVC, a Windows SDK, and WiX 4 with its Util extension |
+| Windows MSI | `./scripts/build-windows.ps1` |
 
-The packages go in `dist/`. The GitHub **Build installers** workflow can also build them manually or when a `v*` tag is pushed.
+Windows builds need MSVC, a Windows SDK, and WiX 4 with its Util extension. Enable EQ and pause playback before running the Windows audio check. [Audio check script](scripts/test-windows-audio.ps1)
 
-To test the Windows audio driver, enable the EQ and pause other playback before running:
+To contribute a headphone preset, add your tuning with the model, impedance, and source, then run `cargo test --locked bundled_catalog`. [Preset catalog](presets/catalog.json)
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-windows-audio.ps1
-```
-
-## Contribute a preset
-
-Save your tuning in Standard. Preset JSON files are in `~/.config/simpledarkeq/presets` or `$XDG_CONFIG_HOME/simpledarkeq/presets` on Linux and `%LOCALAPPDATA%\SimpleDarkEQ\presets` on Windows. Add your preset to [presets/catalog.json](presets/catalog.json) with the headphone model, impedance, and tuning or measurement method. Include source and license details for any third-party data. Validate the catalog with `cargo test --locked bundled_catalog`.
-
-Copyright © 2026 Simple Modern Equalizer contributors. Source is [GPL-3.0-or-later](LICENSE). Builds using Slint’s GPL option are distributed under GPLv3. See [third-party notices](THIRD_PARTY_NOTICES.md).
+Source is GPL-3.0-or-later. Builds using Slint’s GPL option are distributed under GPLv3. [License](LICENSE) · [Third-party notices](THIRD_PARTY_NOTICES.md)
