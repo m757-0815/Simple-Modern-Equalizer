@@ -4425,6 +4425,7 @@ version = "0.1.15"
 dependencies = [
  "cpal",
  "i-slint-backend-testing",
+ "rayon",
  "regex",
  "resonance-ipc",
  "rfd",

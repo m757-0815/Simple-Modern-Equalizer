@@ -1,4 +1,4 @@
-import { Button, CheckBox, ComboBox, LineEdit, ScrollView, Slider, SpinBox, TextEdit } from "std-widgets.slint";
+import { Button, CheckBox, ComboBox, LineEdit, ScrollView, Slider, SpinBox, Spinner, TextEdit } from "std-widgets.slint";
 import "fonts/Inter-Light.ttf";
 
 global Graphite {
@@ -581,6 +581,7 @@ export component MainWindow inherits Window {
     callback change-colors(string) -> string;
     callback toggle-eq-mode();
     in property <bool> fitting-eq;
+    private property <string> fitting-message: "Optimizing EQ curve…";
     in property <string> fit-detail;
     in property <bool> can-undo;
     callback undo();
@@ -625,7 +626,23 @@ export component MainWindow inherits Window {
     callback change-graph-height();
     callback change-tone(float, float, float, bool);
     callback choose-preset(int);
-    public function dismiss-presets() { preset-menu.close(); }
+    callback resolve-preset-load(bool);
+    private property <string> preset-load-name;
+    private property <bool> preset-load-import;
+    public function warn-preset-load(name: string, importing: bool) {
+        preset-menu.close();
+        root.preset-load-name = name;
+        root.preset-load-import = importing;
+        preset-load-warning.show();
+    }
+    public function dismiss-presets() {
+        preset-menu.close();
+        preset-load-warning.close();
+    }
+    function finish-preset-load(confirmed: bool) {
+        preset-load-warning.close();
+        root.resolve-preset-load(confirmed);
+    }
     callback name-preset(bool, string) -> string;
     callback overwrite-preset() -> string;
     private property <string> preset-overwrite-message;
@@ -646,7 +663,8 @@ export component MainWindow inherits Window {
         band-removal.show();
     }
     public function warn-single-band-removal(number: int) {
-        root.band-removal-message = "Band " + number + " was edited or came from an older or imported preset. Remove this band?";
+        root.band-removal-message = (root.spline-eq ? "Spline point " : "Band ") + number
+            + " was edited or came from an older or imported preset.";
         band-removal.show();
     }
     callback change-preamp(float);
@@ -660,6 +678,7 @@ export component MainWindow inherits Window {
     callback edit-band-enabled(int, bool);
     callback hit-band(float, float, float, float) -> int;
     callback add-band(float, float, float, float);
+    callback delete-band-at(float, float, float, float);
     callback move-band(int, float, float) -> int;
     private property <int> drag-generation;
     public function cancel-graph-drag() { root.drag-generation += 1; }
@@ -946,8 +965,8 @@ export component MainWindow inherits Window {
                         vertical-stretch: 1;
                         extent-changed(extent) => { root.eq-plot-extent = extent; }
                         Tooltip { text: root.spline-eq
-                            ? @markdown("Drag a point to edit it. Hold Shift for finer movement. Double-click to add a point. The endpoints move vertically only.")
-                            : @markdown("Drag a band to edit it. Hold Shift for finer movement. Double-click to add a peak filter."); }
+                            ? @markdown("Drag a point to edit it. Hold Shift for finer movement. Double-click to add a point. Right-click to remove an interior point.")
+                            : @markdown("Drag a band to edit it. Hold Shift for finer movement. Double-click to add a peak filter. Right-click a band to remove it."); }
                         private property <int> dragging: -1;
                         private property <int> pressed-generation: -1;
                         private property <int> active-drag: self.pressed-generation == root.drag-generation ? self.dragging : -1;
@@ -1013,6 +1032,7 @@ export component MainWindow inherits Window {
                             private property <length> last-y;
                             private property <float> drag-x;
                             private property <float> drag-y;
+                            private property <bool> right-pressed;
                             double-clicked => {
                                 if (plot.active-drag < 0) {
                                     root.add-band(self.mouse-x / self.width, self.mouse-y / self.height,
@@ -1037,8 +1057,19 @@ export component MainWindow inherits Window {
                                     self.last-y = self.mouse-y;
                                     plot.dragging = root.move-band(plot.active-drag, self.drag-x, self.drag-y);
                                     if (plot.dragging >= 0) { root.selected-point = plot.dragging; }
-                                } else if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
+                                } else if (event.kind == PointerEventKind.down && event.button == PointerEventButton.right) {
+                                    self.right-pressed = !self.pressed;
+                                } else if (event.kind == PointerEventKind.up && event.button == PointerEventButton.right) {
+                                    if (self.right-pressed && !self.pressed && self.mouse-x >= 0px && self.mouse-x <= self.width
+                                        && self.mouse-y >= 0px && self.mouse-y <= self.height) {
+                                        root.delete-band-at(self.mouse-x / self.width, self.mouse-y / self.height,
+                                            self.width / 1px, self.height / 1px);
+                                    }
+                                    self.right-pressed = false;
+                                } else if ((event.kind == PointerEventKind.up && event.button == PointerEventButton.left)
+                                    || event.kind == PointerEventKind.cancel) {
                                     plot.dragging = -1;
+                                    self.right-pressed = false;
                                     root.finish-edit();
                                 }
                             }
@@ -1398,10 +1429,35 @@ export component MainWindow inherits Window {
         }
     }
     }
+    if root.fitting-eq: Panel {
+        width: 218px;
+        height: 46px;
+        x: (root.width - self.width) / 2;
+        y: root.height - self.height - root.page-inset;
+        border-color: Appearance.accent;
+        border-radius: 10px;
+        HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 12px;
+            spacing: 10px;
+            cross-axis-alignment: center;
+            Spinner {
+                width: 30px;
+                height: 30px;
+                indeterminate: true;
+                accessible-label: root.fitting-message;
+            }
+            Label {
+                text: root.fitting-message;
+                font-size: 14px;
+                color: Graphite.text;
+            }
+        }
+    }
     settings := PopupWindow {
         width: 420px;
-        private property <length> form-height: 368px + (root.simple-layout ? 0px : 34px)
-            + (root.has-login-start ? 31px : 0px) + (root.login-start-error == "" ? 0px : 36px);
+        private property <length> form-height: 368px + (root.has-login-start ? 31px : 0px)
+            + (root.login-start-error == "" ? 0px : 36px);
         height: min(self.form-height, root.height - 20px);
         x: clamp(settings-button.absolute-position.x + settings-button.width - self.width, 10px, root.width - self.width - 10px);
         y: clamp(settings-button.absolute-position.y + settings-button.height + 8px, 10px, root.height - self.height - 10px);
@@ -1479,19 +1535,6 @@ export component MainWindow inherits Window {
                     if root.login-start-error != "": Label {
                         text: root.login-start-error; color: Appearance.accent; wrap: word-wrap;
                     }
-                    if !root.simple-layout: HorizontalLayout {
-                        height: 24px;
-                        spacing: 12px;
-                        Label { text: "EQ Type"; width: 100px; }
-                        Label { text: root.spline-eq ? "Spline" : "Parametric"; }
-                        Rectangle { horizontal-stretch: 1; }
-                        Button {
-                            text: root.fitting-eq ? "Fitting…" : root.spline-eq ? "Use Parametric" : "Use Spline";
-                            enabled: !root.listening-to-a && !root.fitting-eq;
-                            Tooltip { text: @markdown("Switch editors and keep the current EQ curve."); }
-                            clicked => { root.toggle-eq-mode(); }
-                        }
-                    }
                     Rectangle { height: 1px; background: Graphite.divider; }
                     GraphLabel { text: "APPEARANCE"; color: Appearance.accent; }
                     accent-field := ColorField {
@@ -1523,6 +1566,50 @@ export component MainWindow inherits Window {
             }
         }
     }
+    preset-load-warning := PopupWindow {
+        width: 460px;
+        height: 174px;
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        close-policy: no-auto-close;
+        forward-focus: cancel-preset-load;
+        Panel {
+            FocusScope {
+                width: parent.width;
+                height: parent.height;
+                capture-key-pressed(event) => {
+                    if event.text == Key.Escape {
+                        root.finish-preset-load(false);
+                        return accept;
+                    }
+                    return reject;
+                }
+                VerticalLayout {
+                    padding: 20px;
+                    spacing: 8px;
+                    PanelHeading { text: "Unsaved EQ Changes"; }
+                    Label { text: root.preset-load-name; color: Appearance.accent; overflow: elide; }
+                    Label {
+                        text: "This will replace your unsaved EQ changes. Cancel to keep editing or save them as a preset first.";
+                        wrap: word-wrap;
+                    }
+                    Rectangle { vertical-stretch: 1; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Rectangle { horizontal-stretch: 1; }
+                        cancel-preset-load := Button {
+                            text: "Cancel";
+                            clicked => { root.finish-preset-load(false); }
+                        }
+                        Button {
+                            text: root.preset-load-import ? "Import and Load" : "Load Preset";
+                            clicked => { root.finish-preset-load(true); }
+                        }
+                    }
+                }
+            }
+        }
+    }
     band-removal := PopupWindow {
         width: 460px;
         height: 180px;
@@ -1537,7 +1624,7 @@ export component MainWindow inherits Window {
             VerticalLayout {
                 padding: 20px;
                 spacing: 12px;
-                Text { text: "Confirm band removal"; color: Graphite.text; font-size: 19px; }
+                Text { text: root.spline-eq ? "Confirm point removal" : "Confirm band removal"; color: Graphite.text; font-size: 19px; }
                 Label { text: root.band-removal-message; wrap: word-wrap; }
                 Rectangle { vertical-stretch: 1; }
                 HorizontalLayout {

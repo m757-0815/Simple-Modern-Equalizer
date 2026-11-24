@@ -614,12 +614,35 @@ fn standard_controls_switch_eq_editors_in_both_directions() {
         assert!(ElementHandle::find_by_accessible_label(&ui, "EQ Bands").next().is_some());
         assert!(ElementHandle::find_by_accessible_label(&ui, "Spline Points").next().is_none());
     }
-    assert!(ElementHandle::find_by_accessible_label(&ui, "Use Spline").next().is_none());
     open_settings(&ui);
-    element(&ui, "Use Spline", AccessibleRole::Button).invoke_accessible_default_action();
-    assert!(ui.get_spline_eq());
-    element(&ui, "Use Parametric", AccessibleRole::Button).invoke_accessible_default_action();
-    assert!(!ui.get_spline_eq());
+    for spline in [false, true] {
+        ui.set_spline_eq(spline);
+        for label in ["EQ Type", "Use Spline", "Use Parametric"] {
+            assert!(ElementHandle::find_by_accessible_label(&ui, label).next().is_none(), "{label}");
+        }
+    }
+}
+
+#[test]
+fn optimizer_shows_a_busy_message_until_the_fit_finishes() {
+    let ui = window();
+    ui.window().set_size(LogicalSize::new(480.0, 360.0));
+    ui.set_show_live_view(false);
+    let weak = ui.as_weak();
+    ui.on_toggle_eq_mode(move || weak.unwrap().set_fitting_eq(true));
+    ui.show().unwrap();
+
+    let message = "Optimizing EQ curve…";
+    assert!(ElementHandle::find_by_accessible_label(&ui, message).next().is_none());
+    element(&ui, "Use Spline From EQ Graph", AccessibleRole::Button).invoke_accessible_default_action();
+    let spinner = element(&ui, message, AccessibleRole::ProgressIndicator);
+    assert!(spinner.absolute_position().y + spinner.size().height < 360.0);
+
+    let main_window_messages = ElementHandle::find_by_accessible_label(&ui, message).count();
+    open_settings(&ui);
+    assert_eq!(ElementHandle::find_by_accessible_label(&ui, message).count(), main_window_messages);
+    ui.set_fitting_eq(false);
+    assert!(ElementHandle::find_by_accessible_label(&ui, message).next().is_none());
 }
 
 #[test]

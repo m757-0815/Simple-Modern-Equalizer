@@ -53,6 +53,11 @@ struct PendingFit {
     superseded: bool,
 }
 
+enum PresetLoad {
+    Saved(usize),
+    Apo(PathBuf),
+}
+
 struct App {
     cfg: Config,
     simple: simple::SimpleSettings,
@@ -71,11 +76,13 @@ struct App {
     plot: graph::GraphCache,
     drag_origin: Option<graph::BandDrag>,
     pending_band_removal: Option<(Config, Config)>,
+    pending_preset_load: Option<PresetLoad>,
     plot_spectrum: Vec<f32>,
     format: Option<engine::AudioFormat>,
     undo: VecDeque<UndoState>,
     edit_group: Option<EditGroup>,
     pending_fit: Option<PendingFit>,
+    fit_cache: fit::Cache,
 }
 
 impl App {
@@ -130,6 +137,7 @@ impl App {
         self.listening_to_a = false;
         self.drag_origin = None;
         self.pending_band_removal = None;
+        self.pending_preset_load = None;
         self.edit_group = None;
         if let Some(job) = &mut self.pending_fit {
             job.superseded = true;
@@ -210,6 +218,11 @@ impl App {
         self.edited = false;
     }
 
+    fn has_unsaved_preset_edits(&self) -> bool {
+        self.edited && self.selected.and_then(|index| self.presets.get(index))
+            .is_none_or(|preset| !preset_matches_config(&preset.config, &self.cfg))
+    }
+
     fn import_apo(&mut self, path: &Path) -> Result<(), String> {
         let mut config = read_apo_config(path)?;
         let base_name = config.name.clone();
@@ -273,6 +286,7 @@ impl App {
             self.edit_group = None;
         }
         self.active_output = id;
+        self.pending_preset_load = None;
         self.reference = None;
         self.listening_to_a = false;
         if let Some(index) = preset_index {
@@ -288,6 +302,17 @@ impl App {
             self.edited = edited;
         }
     }
+}
+
+fn preset_matches_config(preset: &Config, current: &Config) -> bool {
+    let mut saved = preset.clone();
+    saved.bypass = current.bypass;
+    saved.show_live_view = current.show_live_view;
+    // Band edit history only affects removal warnings.
+    for (saved_band, current_band) in saved.bands.iter_mut().zip(&current.bands) {
+        saved_band.edited = current_band.edited;
+    }
+    &saved == current
 }
 
 fn text_model(values: impl IntoIterator<Item = String>) -> ModelRc<SharedString> {
@@ -460,6 +485,54 @@ fn refresh_preset_names(ui: &MainWindow, app: &App) {
     ui.set_presets(text_model(app.presets.iter().map(|p| p.config.name.clone())));
 }
 
+fn load_preset(ui: &MainWindow, app: &mut App, load: PresetLoad) {
+    let previous = app.undo_state();
+    match load {
+        PresetLoad::Saved(index) => app.select_preset(index),
+        PresetLoad::Apo(path) => {
+            if let Err(error) = app.import_apo(&path) {
+                rfd::MessageDialog::new().set_title("Import Equalizer APO")
+                    .set_level(rfd::MessageLevel::Error).set_description(error).show();
+                return;
+            }
+            refresh_preset_names(ui, app);
+        }
+    }
+    app.remember(previous, None);
+    app.simple.active = false;
+    ui.invoke_clear_point_selection();
+    ui.set_simple_layout(false);
+    ui.set_notice("".into());
+    apply_and_update_controls(ui, app);
+}
+
+fn request_preset_load(ui: &MainWindow, app: &mut App, load: PresetLoad) {
+    let name: SharedString = match &load {
+        PresetLoad::Saved(index) => {
+            let Some(preset) = app.presets.get(*index) else { return; };
+            if preset_matches_config(&preset.config, &app.cfg) {
+                load_preset(ui, app, load);
+                return;
+            }
+            preset.config.name.as_str().into()
+        }
+        PresetLoad::Apo(path) => path.file_name().unwrap_or(path.as_os_str()).to_string_lossy().as_ref().into(),
+    };
+    if app.has_unsaved_preset_edits() {
+        let importing = matches!(&load, PresetLoad::Apo(_));
+        app.pending_preset_load = Some(load);
+        ui.invoke_warn_preset_load(name, importing);
+    } else {
+        load_preset(ui, app, load);
+    }
+}
+
+fn resolve_preset_load(ui: &MainWindow, app: &mut App, confirmed: bool) {
+    if let Some(load) = app.pending_preset_load.take() && confirmed {
+        load_preset(ui, app, load);
+    }
+}
+
 fn commit(ui: &MainWindow, app: &mut App, candidate: Config) {
     commit_edit(ui, app, candidate, None);
 }
@@ -499,17 +572,53 @@ fn poll_fit(ui: &MainWindow, app: &mut App) {
                 ui.set_notice("EQ changed during fitting. Switch modes again to fit the current curve.".into());
                 return;
             }
-            commit(ui, app, candidate);
-            ui.set_fit_detail(format!("Fit Error {error:.2} dB").into());
-            if error > fit::TOLERANCE_DB {
-                ui.set_notice(format!("The fitted curve differs by up to {error:.2} dB. Use Undo to restore the previous EQ.").into());
-            }
+            finish_fit(ui, app, candidate, error);
         }
         Err(mpsc::TryRecvError::Empty) => app.pending_fit = Some(job),
         Err(mpsc::TryRecvError::Disconnected) => {
             ui.set_fitting_eq(false);
             ui.set_notice("Could not fit the EQ curve.".into());
         }
+    }
+}
+
+fn finish_fit(ui: &MainWindow, app: &mut App, candidate: Config, error: f64) {
+    if commit_edit(ui, app, candidate, None) {
+        app.fit_cache.remember(&app.cfg, error);
+        ui.set_fit_detail(format!("Fit Error {error:.2} dB").into());
+        if error > fit::TOLERANCE_DB {
+            ui.set_notice(format!("The fitted curve differs by up to {error:.2} dB. Use Undo to restore the previous EQ.").into());
+        }
+    }
+}
+
+fn delete_band(ui: &MainWindow, app: &mut App, index: usize) {
+    if app.listening_to_a || app.simple.active { return; }
+    let Some(band) = app.cfg.bands.get(index) else { return; };
+    if app.cfg.locked_point(index) { return; }
+    ui.invoke_clear_point_selection();
+    let mut candidate = app.cfg.clone();
+    candidate.bands.remove(index);
+    if band.needs_removal_confirmation() {
+        app.pending_band_removal = Some((app.cfg.clone(), candidate));
+        ui.invoke_warn_single_band_removal((index + 1) as i32);
+    } else {
+        app.pending_band_removal = None;
+        commit(ui, app, candidate);
+    }
+}
+
+fn delete_band_at(ui: &MainWindow, app: &mut App, x: f32, y: f32, width: f32, height: f32) {
+    if let Some(index) = graph::hit_band(&app.plot.dots, x.into(), y.into(), width.into(), height.into()) {
+        delete_band(ui, app, index);
+    }
+}
+
+fn resolve_band_removal(ui: &MainWindow, app: &mut App, confirmed: bool) {
+    if let Some((original, candidate)) = app.pending_band_removal.take()
+        && confirmed && !app.listening_to_a && !app.simple.active && app.cfg == original
+    {
+        commit(ui, app, candidate);
     }
 }
 
@@ -649,17 +758,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     Preset::restore_builtin_name(&presets, &mut cfg);
     presets.extend(Preset::load_custom(&directory.join("presets"))?);
-    let selected = presets.iter().position(|preset| {
-        let mut saved = preset.config.clone();
-        saved.bypass = cfg.bypass;
-        saved.show_live_view = cfg.show_live_view;
-        // Edit history affects removal warnings, not the preset's sound or selection.
-        for (saved_band, current_band) in saved.bands.iter_mut().zip(&cfg.bands) {
-            saved_band.edited = current_band.edited;
-        }
-        saved == cfg
-    });
-    let edited = selected.is_none() && presets.iter().any(|preset| preset.config.name == cfg.name);
+    let selected = presets.iter().position(|preset| preset_matches_config(&preset.config, &cfg));
+    let edited = selected.is_none();
     let preferences: Preferences = storage::read_text(&directory.join("preferences.json")).ok()
         .and_then(|text| serde_json::from_str(text.trim_start_matches('\u{feff}')).ok()).unwrap_or_default();
     let simple: simple::SimpleSettings = storage::read_text(&directory.join("simple.json")).ok()
@@ -671,8 +771,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         selected, preferences, active_output: None, fallback: None, reference: None, listening_to_a: false,
         effective: initial,
         outputs: vec![], directory, edited, plot: graph::GraphCache::default(), drag_origin: None,
-        pending_band_removal: None, plot_spectrum: vec![], format: None,
-        undo: VecDeque::new(), edit_group: None, pending_fit: None }));
+        pending_band_removal: None, pending_preset_load: None, plot_spectrum: vec![], format: None,
+        undo: VecDeque::new(), edit_group: None, pending_fit: None, fit_cache: fit::Cache::default() }));
     let ui = MainWindow::new()?;
     #[cfg(target_os = "linux")]
     {
@@ -846,6 +946,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if a.listening_to_a || a.simple.active || a.pending_fit.is_some() { return; }
         w.invoke_cancel_graph_drag();
         let rate = a.fit_rate();
+        if let Some((candidate, error)) = a.fit_cache.reuse(&a.cfg, rate) {
+            finish_fit(&w, &mut a, candidate, error);
+            return;
+        }
         let original = a.cfg.clone();
         let source = original.clone();
         let (send, result) = mpsc::channel();
@@ -877,27 +981,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     on_ui_action!(on_delete_band, |w, a, index| {
-        if a.listening_to_a || a.simple.active { return; }
-        let index = index as usize;
-        let Some(band) = a.cfg.bands.get(index) else { return; };
-        if a.cfg.locked_point(index) { return; }
-        w.invoke_clear_point_selection();
-        let mut candidate = a.cfg.clone();
-        candidate.bands.remove(index);
-        if band.needs_removal_confirmation() {
-            a.pending_band_removal = Some((a.cfg.clone(), candidate));
-            w.invoke_warn_single_band_removal((index + 1) as i32);
-        } else {
-            a.pending_band_removal = None;
-            commit(&w, &mut a, candidate);
-        }
+        delete_band(&w, &mut a, index as usize);
+    });
+    on_ui_action!(on_delete_band_at, |w, a, x, y, width, height| {
+        delete_band_at(&w, &mut a, x, y, width, height);
     });
     on_ui_action!(on_resolve_band_removal, |w, a, confirmed| {
-        if let Some((original, candidate)) = a.pending_band_removal.take()
-            && confirmed && !a.listening_to_a && !a.simple.active && a.cfg == original
-        {
-            commit(&w, &mut a, candidate);
-        }
+        resolve_band_removal(&w, &mut a, confirmed);
     });
     on_ui_action!(on_edit_band_number, |w, a, index, is_frequency, text| {
         if a.cfg.spline && (!is_frequency || a.cfg.locked_point(index as usize)) { return; }
@@ -989,15 +1079,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
     on_ui_action!(on_choose_preset, |w, a, index| {
-        if a.presets.get(index as usize).is_some() {
-            w.invoke_clear_point_selection();
-            a.remember_current(None);
-            a.select_preset(index as usize);
-            a.simple.active = false;
-            w.set_simple_layout(false);
-            w.set_notice("".into());
-            apply_and_update_controls(&w, &mut a);
-        }
+        request_preset_load(&w, &mut a, PresetLoad::Saved(index as usize));
+    });
+    on_ui_action!(on_resolve_preset_load, |w, a, confirmed| {
+        resolve_preset_load(&w, &mut a, confirmed);
     });
     {
         let weak = ui.as_weak();
@@ -1112,21 +1197,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .add_filter("Equalizer APO", &["txt"])
             .pick_file()
         {
-            let previous = a.undo_state();
-            match a.import_apo(&path) {
-                Ok(()) => {
-                    a.remember(previous, None);
-                    w.invoke_clear_point_selection();
-                    w.set_simple_layout(false);
-                    w.set_notice("".into());
-                    refresh_preset_names(&w, &a);
-                    apply_and_update_controls(&w, &mut a);
-                }
-                Err(error) => {
-                    rfd::MessageDialog::new().set_title("Import Equalizer APO")
-                        .set_level(rfd::MessageLevel::Error).set_description(error).show();
-                }
-            }
+            request_preset_load(&w, &mut a, PresetLoad::Apo(path));
         }
     });
     on_ui_action!(on_save_config, |w, a, | {
@@ -1397,12 +1468,148 @@ mod tests {
             plot: graph::GraphCache::default(),
             drag_origin: None,
             pending_band_removal: None,
+            pending_preset_load: None,
             plot_spectrum: vec![],
             format: None,
             undo: VecDeque::new(),
             edit_group: None,
             pending_fit: None,
+            fit_cache: fit::Cache::default(),
         }
+    }
+
+    #[test]
+    fn right_click_removes_the_hit_point_and_respects_confirmation_and_endpoints() {
+        use i_slint_backend_testing::{AccessibleRole, ElementHandle};
+        use slint::{LogicalPosition, LogicalSize, platform::{PointerEventButton, WindowEvent}};
+
+        i_slint_backend_testing::init_no_event_loop();
+        let mut config = Config::flat_spline();
+        config.show_live_view = false;
+        assert!(config.add_peak(500.0, 4.0));
+        assert!(config.add_peak(2000.0, -6.0));
+        config.bands[2].edited = Some(false);
+        let app = Rc::new(RefCell::new(app_for_preset_tests(config.clone())));
+        let ui = MainWindow::new().unwrap();
+        ui.window().set_size(LogicalSize::new(1056.0, 860.0));
+        ui.show().unwrap();
+        let weak = ui.as_weak();
+        let state = app.clone();
+        ui.on_delete_band_at(move |x, y, width, height| {
+            delete_band_at(&weak.unwrap(), &mut state.borrow_mut(), x, y, width, height);
+        });
+        let weak = ui.as_weak();
+        let state = app.clone();
+        ui.on_resolve_band_removal(move |confirmed| {
+            resolve_band_removal(&weak.unwrap(), &mut state.borrow_mut(), confirmed);
+        });
+        apply_and_update_controls(&ui, &mut app.borrow_mut());
+
+        let plot = ElementHandle::find_by_element_id(&ui, "MainWindow::plot").next().unwrap();
+        let origin = plot.absolute_position();
+        let size = plot.size();
+        let right_click = |x: f64, y: f64| {
+            let position = LogicalPosition::new(origin.x + (size.width * x as f32).max(1.0),
+                origin.y + size.height * y as f32);
+            ui.window().dispatch_event(WindowEvent::PointerPressed { position, button: PointerEventButton::Right });
+            ui.window().dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Right });
+        };
+        let dots = app.borrow().plot.dots.clone();
+        right_click(0.8, 0.1);
+        right_click(dots[0].x, dots[0].y);
+        assert_eq!(app.borrow().cfg, config);
+        assert!(app.borrow().pending_band_removal.is_none());
+
+        for button in ["Cancel", "Remove"] {
+            right_click(dots[1].x, dots[1].y);
+            assert_eq!(app.borrow().cfg, config);
+            ElementHandle::find_by_accessible_label(&ui, button)
+                .find(|element| element.accessible_role() == Some(AccessibleRole::Button))
+                .unwrap().invoke_accessible_default_action();
+        }
+        assert_eq!(app.borrow().cfg.bands, [config.bands[0].clone(), config.bands[2].clone(), config.bands[3].clone()]);
+        right_click(dots[2].x, dots[2].y);
+        assert_eq!(app.borrow().cfg.bands, [config.bands[0].clone(), config.bands[3].clone()]);
+        assert!(app.borrow().pending_band_removal.is_none());
+        assert!(app.borrow_mut().undo_edit().unwrap());
+        assert_eq!(app.borrow().cfg.bands.len(), 3);
+        fs::remove_dir_all(&app.borrow().directory).unwrap();
+    }
+
+    #[test]
+    fn loading_presets_only_replaces_unsaved_eq_after_confirmation() {
+        use i_slint_backend_testing::{AccessibleRole, ElementHandle};
+        use slint::platform::{Key, WindowEvent};
+
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = MainWindow::new().unwrap();
+        ui.show().unwrap();
+        let app = Rc::new(RefCell::new(app_for_preset_tests(Config::default())));
+        let weak = ui.as_weak();
+        let state = app.clone();
+        ui.on_resolve_preset_load(move |confirmed| {
+            resolve_preset_load(&weak.unwrap(), &mut state.borrow_mut(), confirmed);
+        });
+        let weak = ui.as_weak();
+        let state = app.clone();
+        ui.on_choose_preset(move |index| {
+            request_preset_load(&weak.unwrap(), &mut state.borrow_mut(), PresetLoad::Saved(index as usize));
+        });
+        let press = |label: &str| {
+            ElementHandle::find_by_accessible_label(&ui, label)
+                .find(|element| element.accessible_role() == Some(AccessibleRole::Button))
+                .unwrap().invoke_accessible_default_action();
+        };
+        {
+            let mut app = app.borrow_mut();
+            app.presets.push(Preset::builtin(Config { name: "Another preset".into(), ..Config::default() }));
+            app.cfg.bypass = true;
+            app.cfg.show_live_view = false;
+            app.cfg.bands[0].edited = Some(true);
+            refresh_preset_names(&ui, &app);
+            update_controls(&ui, &app);
+        }
+        let choose = |index: usize| {
+            let label = {
+                let app = app.borrow();
+                let suffix = if app.selected == Some(index) { " (selected)" } else { "" };
+                format!("{}{suffix}", app.presets[index].config.name)
+            };
+            press("Select Preset");
+            press(&label);
+        };
+        choose(1);
+        assert_eq!(app.borrow().selected, Some(1));
+        assert!(app.borrow().pending_preset_load.is_none());
+        let edited = {
+            let mut app = app.borrow_mut();
+            app.cfg.bands[0].gain_db = 5.0;
+            app.edited = true;
+            app.cfg.clone()
+        };
+        choose(0);
+        assert_eq!(app.borrow().cfg, edited);
+        assert!(ElementHandle::find_by_accessible_label(&ui, "Unsaved EQ Changes").next().is_some());
+        ui.window().dispatch_event(WindowEvent::KeyPressed { text: Key::Escape.into() });
+        ui.window().dispatch_event(WindowEvent::KeyReleased { text: Key::Escape.into() });
+        assert!(app.borrow().pending_preset_load.is_none());
+        assert_eq!(app.borrow().cfg, edited);
+
+        let source = app.borrow().directory.join("test.txt");
+        fs::write(&source, "Filter: ON PK Fc 1000 Hz Gain -3 dB Q 1").unwrap();
+        request_preset_load(&ui, &mut app.borrow_mut(), PresetLoad::Apo(source));
+        press("Cancel");
+        assert!(app.borrow().pending_preset_load.is_none());
+        assert_eq!(app.borrow().cfg, edited);
+        assert_eq!(fs::read_dir(app.borrow().directory.join("presets")).unwrap().count(), 0);
+
+        choose(0);
+        press("Load Preset");
+        assert_eq!(app.borrow().selected, Some(0));
+        assert!(!app.borrow().edited);
+        assert!(app.borrow_mut().undo_edit().unwrap());
+        assert_eq!(app.borrow().cfg, edited);
+        fs::remove_dir_all(&app.borrow().directory).unwrap();
     }
 
     #[test]
