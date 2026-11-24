@@ -4435,6 +4435,8 @@ dependencies = [
  "slint",
  "slint-build",
  "tiny-skia 0.12.0",
+ "windows",
+ "zbus",
 ]
 
 [[package]]

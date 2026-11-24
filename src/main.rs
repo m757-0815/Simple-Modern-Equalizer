@@ -8,6 +8,7 @@ mod graph;
 mod listening;
 mod live;
 mod monitor;
+mod now_playing;
 mod plot_canvas;
 mod presets;
 mod scope;
@@ -15,6 +16,7 @@ mod simple;
 mod spectrum;
 mod spline;
 mod storage;
+mod test_tone;
 mod theme;
 #[cfg(test)]
 mod ui_tests;
@@ -70,6 +72,7 @@ struct App {
     listening_to_a: bool,
     effective: Config,
     engine: engine::Engine,
+    test_tone: test_tone::TestTone,
     outputs: Vec<String>,
     directory: PathBuf,
     edited: bool,
@@ -775,11 +778,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let app = Rc::new(RefCell::new(App { engine: engine::Engine::start(&directory), cfg, simple, presets,
         selected, preferences, active_output: None, fallback: None, reference: None, listening_to_a: false,
-        effective: initial,
+        effective: initial, test_tone: test_tone::TestTone::default(),
         outputs: vec![], directory, edited, plot: graph::GraphCache::default(), drag_origin: None,
         pending_band_removal: None, pending_preset_load: None, plot_spectrum: vec![], format: None,
         undo: VecDeque::new(), edit_group: None, pending_fit: None, fit_cache: fit::Cache::default() }));
     let ui = MainWindow::new()?;
+    ui.set_has_test_tone(cfg!(any(windows, target_os = "linux")));
     #[cfg(target_os = "linux")]
     {
         slint::set_xdg_app_id("simple-modern-equalizer")?;
@@ -935,6 +939,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             a.remember_current(None);
             a.cfg.bypass = value;
             apply_and_update_controls(&w, &mut a);
+        }
+    });
+    on_ui_action!(on_play_test_tone, |w, a, play| {
+        w.set_test_tone_error("".into());
+        if !play {
+            a.test_tone.stop();
+            w.set_test_tone_playing(false);
+            return;
+        }
+        let started = a.active_output.clone().filter(|_| w.get_connected())
+            .ok_or_else(|| "Choose an available audio output to play a test tone.".to_string())
+            .and_then(|output| a.test_tone.start(&output, w.get_test_tone_frequency()));
+        w.set_test_tone_playing(started.is_ok());
+        match started {
+            Ok(frequency) => w.set_test_tone_frequency(frequency),
+            Err(error) => w.set_test_tone_error(error.into()),
+        }
+    });
+    on_ui_action!(on_change_test_tone_frequency, |w, a, frequency| {
+        let actual = a.test_tone.change_frequency(frequency);
+        if actual != frequency {
+            w.set_test_tone_frequency(actual);
         }
     });
     on_ui_action!(on_finish_edit, |_w, a, | { a.edit_group = None; });
@@ -1204,6 +1230,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     on_ui_action!(on_choose_output, |w, a, index| {
         let target = if index <= 0 { None } else { a.outputs.get(index as usize - 1).cloned() };
+        a.test_tone.stop();
+        w.set_test_tone_playing(false);
         a.engine.shared.lock().unwrap().target = Some(target);
         w.set_status("Switching output…".into());
     });
@@ -1239,11 +1267,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let live_meters = RefCell::new(live::LiveMeters::default());
     let monitor_plots = RefCell::new(monitor::Plots::default());
     let mut loudness = monitor::History::default();
+    ui.set_has_now_playing(cfg!(any(windows, target_os = "linux")));
+    let media_updates = now_playing::subscribe();
+    let mut media = now_playing::Snapshot::default();
     let engine_state = app.borrow().engine.shared.clone();
     let mut stereo_levels = [-60.0; 2];
     let mut last_frame = Instant::now();
     let mut next_control = last_frame;
     let mut next_display_probe = last_frame;
+    let mut next_media_refresh = last_frame;
     let mut display_interval = live::display_interval(None);
     let mut clip_until = Instant::now();
     let timer = Rc::new(slint::Timer::default());
@@ -1312,6 +1344,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Some((snapshot, status, clipped, clip_spectrum)) = control {
             let connection_changed = w.get_connected() != snapshot.is_some();
             w.set_status(status.into()); w.set_connected(snapshot.is_some());
+            if w.get_test_tone_playing() {
+                let output = snapshot.as_ref().and_then(|(_, format, ..)| format.output.as_deref());
+                match a.test_tone.poll(output, now) {
+                    Ok(playing) => w.set_test_tone_playing(playing),
+                    Err(error) => {
+                        w.set_test_tone_playing(false);
+                        w.set_test_tone_error(error.into());
+                    }
+                }
+            }
             if let Some((meters, format, ..)) = &snapshot {
                 if a.format.as_ref() != Some(format) {
                     loudness.clear();
@@ -1379,6 +1421,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 w.set_clip_regions(ModelRc::default());
             }
         }
+        if w.get_has_now_playing() && now >= next_media_refresh {
+            next_media_refresh = now + Duration::from_millis(500);
+            if let Ok(update) = media_updates.try_recv() {
+                media = update;
+            }
+            let output = media.output;
+            #[cfg(target_os = "linux")]
+            let output = output.or_else(|| {
+                let format = a.format.as_ref().filter(|format| w.get_connected() && format.output.is_some())?;
+                // The PipeWire EQ graph exposes one 32-bit float port per channel.
+                now_playing::OutputFormat::new(format.sample_rate.round() as u32, 32, true)
+            });
+            let track = media.track.as_ref();
+            w.set_playback_details(PlaybackDetails {
+                title: track.map_or("No track reported", |track| track.title.as_str()).into(),
+                artist: track.map_or("", |track| track.artist.as_str()).into(),
+                sample_rate: output.map_or_else(|| "—".into(), |format| now_playing::format_rate(format.sample_rate).into()),
+                bit_depth: output.map_or_else(|| "—".into(), |format| format.bit_depth_label().into()),
+            });
+        }
         if show_live_view && mode == live::STEREO_LEVEL_MODE {
             let [left, right] = live::smooth_stereo(&mut stereo_levels, stereo_rms, elapsed);
             w.set_left_level_dbfs(left);
@@ -1440,6 +1502,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ui.run()?;
     timer.stop();
     let mut a = app.borrow_mut();
+    a.test_tone.stop();
     let mut current = a.fallback.as_ref().map_or_else(|| a.cfg.clone(), |(config, _, _)| config.clone());
     current.bypass = a.cfg.bypass;
     current.show_live_view = a.cfg.show_live_view;
@@ -1478,6 +1541,7 @@ mod tests {
             listening_to_a: false,
             effective: standard.clone(),
             engine: engine::Engine::idle_for_test(),
+            test_tone: test_tone::TestTone::default(),
             outputs: vec![],
             directory,
             edited: true,

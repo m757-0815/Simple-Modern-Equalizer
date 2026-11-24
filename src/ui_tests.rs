@@ -312,9 +312,8 @@ fn preamp_spinbox_steps_by_005_and_auto_headroom_locks_controls() {
 }
 
 #[test]
-fn eq_range_spinbox_stays_at_the_graphs_upper_right() {
+fn eq_range_spinbox_stays_attached_to_the_graphs_right_edge() {
     let ui = window();
-    ui.window().set_size(LogicalSize::new(480.0, 360.0));
     ui.set_show_live_view(false);
     ui.set_spline_eq(true);
     ui.set_fit_detail("Fit Error 0.15 dB".into());
@@ -325,10 +324,18 @@ fn eq_range_spinbox_stays_at_the_graphs_upper_right() {
 
     let range = element(&ui, "EQ graph range in dB", AccessibleRole::Spinbox);
     let graph = ElementHandle::find_by_element_id(&ui, "MainWindow::plot").next().unwrap();
-    let switch = element(&ui, "Use Parametric From EQ Graph", AccessibleRole::Button);
-    assert!(range.absolute_position().x >= switch.absolute_position().x + switch.size().width);
-    assert!(range.absolute_position().y + range.size().height <= graph.absolute_position().y);
-    assert!(range.absolute_position().x + range.size().width <= 470.0);
+    let dock = ElementHandle::find_by_element_id(&ui, "MainWindow::range-dock").next().unwrap();
+    for (width, height) in [(1120.0, 920.0), (480.0, 360.0)] {
+        ui.window().set_size(LogicalSize::new(width, height));
+        let graph_position = graph.absolute_position();
+        let graph_right = graph_position.x + graph.size().width;
+        let range_position = range.absolute_position();
+        assert!((dock.absolute_position().x - graph_right + 1.0).abs() < 0.1);
+        assert!(range_position.x >= graph_right + 10.0);
+        assert!(range_position.x + range.size().width <= width - 10.0);
+        assert!(range_position.y >= graph_position.y);
+        assert!(range_position.y + range.size().height <= graph_position.y + graph.size().height);
+    }
     assert_eq!(ui.get_eq_range_db(), 24);
     range.set_accessible_value("1");
     assert_eq!(ui.get_eq_range_db(), 1);
@@ -338,6 +345,73 @@ fn eq_range_spinbox_stays_at_the_graphs_upper_right() {
     range.invoke_accessible_increment_action();
     assert_eq!(ui.get_eq_range_db(), 24);
     assert!(edits.get() >= 2);
+}
+
+#[test]
+fn now_playing_shows_output_bit_depth_in_both_layouts() {
+    let ui = window();
+    ui.set_playback_details(crate::PlaybackDetails {
+        title: "An Example Song".into(), artist: "An Example Artist".into(),
+        sample_rate: "44.1 kHz".into(), bit_depth: "24-bit".into(),
+    });
+    ui.show().unwrap();
+
+    for width in [1120.0, 480.0] {
+        ui.window().set_size(LogicalSize::new(width, 680.0));
+        for simple in [false, true] {
+            ui.set_simple_layout(simple);
+            if width == 480.0 {
+                ui.window().dispatch_event(WindowEvent::PointerScrolled {
+                    position: LogicalPosition::new(10.0, 240.0), delta_x: 0.0, delta_y: -4000.0,
+                });
+                i_slint_backend_testing::mock_elapsed_time(std::time::Duration::from_millis(250));
+            }
+            for label in ["An Example Song · An Example Artist", "Output sample rate 44.1 kHz", "Output bit depth 24-bit"] {
+                let value = ElementHandle::find_by_accessible_label(&ui, label).next()
+                    .unwrap_or_else(|| panic!("missing {label} at width {width}, simple={simple}"));
+                assert!(value.absolute_position().x + value.size().width <= width);
+            }
+        }
+    }
+    ui.set_playback_details(crate::PlaybackDetails {
+        bit_depth: "32-bit float".into(), ..ui.get_playback_details()
+    });
+    assert!(ElementHandle::find_by_accessible_label(&ui, "Output bit depth 32-bit float").next().is_some());
+}
+
+#[test]
+fn test_tone_controls_fit_a_small_window_and_stop_on_dismissal() {
+    let ui = window();
+    ui.window().set_size(LogicalSize::new(480.0, 360.0));
+    ui.set_has_test_tone(true);
+    ui.set_connected(true);
+    ui.set_active_output_label("Speakers".into());
+    let playback = Rc::new(RefCell::new(Vec::new()));
+    let captured = playback.clone();
+    let weak = ui.as_weak();
+    ui.on_play_test_tone(move |playing| {
+        captured.borrow_mut().push(playing);
+        weak.upgrade().unwrap().set_test_tone_playing(playing);
+    });
+    ui.show().unwrap();
+
+    let toggle = element(&ui, "Test Tone", AccessibleRole::Button);
+    toggle.invoke_accessible_default_action();
+    let monitor = element(&ui, "Expand Live Monitor", AccessibleRole::Button);
+    assert!(monitor.absolute_position().x + monitor.size().width <= 480.0);
+    let pitch = element(&ui, "Test tone frequency in hertz", AccessibleRole::Spinbox);
+    pitch.set_accessible_value("125");
+    assert_eq!(ui.get_test_tone_frequency(), 125);
+    let play = element(&ui, "Play test tone", AccessibleRole::Button);
+    assert!(play.absolute_position().x + play.size().width <= 480.0);
+    play.invoke_accessible_default_action();
+    assert!(ui.get_test_tone_playing());
+    key(&ui, Key::Escape);
+    assert!(!ui.get_test_tone_playing());
+    play.invoke_accessible_default_action();
+    toggle.invoke_accessible_default_action();
+    assert!(!ui.get_test_tone_playing());
+    assert_eq!(*playback.borrow(), [true, false, true, false]);
 }
 
 #[test]
@@ -446,10 +520,12 @@ fn delete_button_targets_its_own_eq_band() {
 #[test]
 fn eq_graph_height_adjusts_the_plot_in_place() {
     let ui = window();
+    ui.set_graph_dots(Rc::new(VecModel::from(vec![GraphDot { x: 0.5, y: 0.5, enabled: true }])).into());
     ui.show().unwrap();
     ui.window().set_size(LogicalSize::new(860.0, 1080.0));
     let plot = ElementHandle::find_by_element_id(&ui, "MainWindow::plot").next().unwrap();
-    assert!(f64::from(plot.size().width) * crate::spline::MIN_POINT_GAP >= 20.0);
+    let handle = ElementHandle::find_by_element_id(&ui, "MainWindow::graph-handle").next().unwrap();
+    assert!(f64::from(plot.size().width) * crate::spline::MIN_POINT_GAP >= f64::from(handle.size().width));
     let slider = element(&ui, "EQ graph height", AccessibleRole::Slider);
     assert_eq!(plot.size().height, 260.0);
     let point = slider.absolute_position();

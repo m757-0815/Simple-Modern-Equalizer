@@ -217,6 +217,13 @@ export struct PlotExtent {
     height: float,
 }
 
+export struct PlaybackDetails {
+    title: string,
+    artist: string,
+    sample-rate: string,
+    bit-depth: string,
+}
+
 component PlotArea inherits Rectangle {
     callback extent-changed(PlotExtent);
     private property <PlotExtent> extent: { width: self.width / 1px, height: self.height / 1px };
@@ -233,6 +240,45 @@ component Label inherits Text {
 component GraphLabel inherits Label {
     font-size: 11px;
     letter-spacing: 0.4px;
+}
+
+component NowPlayingPanel inherits Panel {
+    in property <PlaybackDetails> details;
+    HorizontalLayout {
+        padding-left: Graphite.panel-inset;
+        padding-right: Graphite.panel-inset;
+        spacing: 12px;
+        cross-axis-alignment: center;
+        VerticalLayout {
+            horizontal-stretch: 1;
+            min-width: 0px;
+            spacing: 3px;
+            GraphLabel { text: "NOW PLAYING"; color: Appearance.accent; }
+            Label {
+                text: root.details.artist == "" ? root.details.title : root.details.title + " · " + root.details.artist;
+                accessible-label: self.text;
+                color: Graphite.text;
+                font-size: 14px;
+                min-width: 0px;
+                overflow: elide;
+            }
+        }
+        Rectangle { width: 1px; height: 34px; background: Graphite.border; }
+        VerticalLayout {
+            spacing: 3px;
+            GraphLabel { text: "OUTPUT SAMPLE RATE"; }
+            Label { text: root.details.sample-rate; color: Graphite.text; accessible-label: "Output sample rate " + self.text; }
+        }
+        VerticalLayout {
+            spacing: 3px;
+            GraphLabel { text: "OUTPUT BIT DEPTH"; }
+            Label {
+                text: root.details.bit-depth;
+                color: Graphite.text;
+                accessible-label: "Output bit depth " + self.text;
+            }
+        }
+    }
 }
 
 component Choice inherits Rectangle {
@@ -534,6 +580,7 @@ export component MainWindow inherits Window {
     private property <bool> short: self.height < 500px;
     private property <length> page-inset: self.narrow ? 10px : 18px;
     private property <length> graph-axis-inset: self.narrow ? 42px : 58px;
+    private property <length> graph-range-inset: 88px;
     private property <bool> open-short-monitor;
     out property <bool> live-monitor-expanded: root.show-live-view && (!root.short || root.open-short-monitor);
     private property <length> graph-height: (self.short
@@ -566,6 +613,18 @@ export component MainWindow inherits Window {
     in-out property <float> balance;
     in-out property <bool> bypass;
     in-out property <bool> show-live-view: true;
+    in property <bool> has-now-playing: true;
+    in property <PlaybackDetails> playback-details: {
+        title: "No track reported", artist: "", sample-rate: "—", bit-depth: "—"
+    };
+    in property <bool> has-test-tone;
+    in property <bool> test-tone-playing;
+    in property <string> test-tone-error;
+    in-out property <int> test-tone-frequency: 1000;
+    private property <bool> test-tone-open;
+    private property <length> test-tone-height: root.test-tone-error == "" ? 48px : 96px;
+    callback play-test-tone(bool);
+    callback change-test-tone-frequency(int);
     in-out property <bool> show-band-list: true;
     in property <bool> spline-eq;
     in-out property <bool> show-levels: true;
@@ -698,6 +757,10 @@ export component MainWindow inherits Window {
         width: parent.width;
         height: parent.height;
         capture-key-pressed(event) => {
+            if (root.test-tone-playing && event.text == Key.Escape) {
+                root.play-test-tone(false);
+                return accept;
+            }
             if (root.fullscreen-enabled && event.text == Key.Escape) {
                 root.set-fullscreen-mode(false);
                 return accept;
@@ -934,24 +997,6 @@ export component MainWindow inherits Window {
                         Tooltip { text: @markdown("Largest difference from the reference curve on the fitting grid."); }
                     }
                     Rectangle { horizontal-stretch: 1; }
-                    HorizontalLayout {
-                        spacing: 4px;
-                        cross-axis-alignment: center;
-                        GraphLabel { text: "±"; }
-                        SpinBox {
-                            width: 76px;
-                            minimum: 1;
-                            maximum: 24;
-                            value <=> root.eq-range-db;
-                            accessible-label: "EQ graph range in dB";
-                            Tooltip { text: @markdown("Set the gain range above and below the graph center. Smaller values make vertical adjustments finer."); }
-                            edited(value) => {
-                                root.change-eq-range();
-                                root.save-graph-view();
-                            }
-                        }
-                        GraphLabel { text: "dB"; }
-                    }
                 }
                 HorizontalLayout {
                     height: 17px;
@@ -973,9 +1018,8 @@ export component MainWindow inherits Window {
                 }
                 HorizontalLayout {
                     height: root.graph-height;
-                    spacing: root.narrow ? 6px : 9px;
                     Rectangle {
-                        width: root.graph-axis-inset - (root.narrow ? 6px : 9px);
+                        width: root.graph-axis-inset;
                         GraphLabel { text: root.eq-top-db; y: 0px; }
                         GraphLabel {
                             text: "0 dB";
@@ -987,6 +1031,7 @@ export component MainWindow inherits Window {
                     plot := PlotArea {
                         horizontal-stretch: 1;
                         vertical-stretch: 1;
+                        z: 1;
                         extent-changed(extent) => { root.eq-plot-extent = extent; }
                         Tooltip { text: root.spline-eq
                             ? @markdown("Drag a point to edit it. Hold Shift for finer movement. Double-click to add a point. Right-click to remove an interior point.")
@@ -994,7 +1039,7 @@ export component MainWindow inherits Window {
                         private property <int> dragging: -1;
                         private property <int> pressed-generation: -1;
                         private property <int> active-drag: self.pressed-generation == root.drag-generation ? self.dragging : -1;
-                        private property <length> handle-size: root.narrow ? clamp(self.width * 0.027, 10px, 20px) : 20px;
+                        private property <length> handle-size: min(self.width * 0.027, 20px);
 
                         Rectangle {
                             width: parent.width; height: parent.height;
@@ -1011,7 +1056,7 @@ export component MainWindow inherits Window {
                                 background: Appearance.accent.transparentize(0.82);
                             }
                         }
-                        for dot[index] in root.graph-dots: Rectangle {
+                        for dot[index] in root.graph-dots: graph-handle := Rectangle {
                             width: plot.handle-size; height: self.width; border-radius: self.width / 2;
                             x: dot.x * parent.width - self.width / 2;
                             y: clamp(dot.y, 0, 1) * parent.height - self.height / 2;
@@ -1099,9 +1144,44 @@ export component MainWindow inherits Window {
                             }
                         }
                     }
+                    Rectangle {
+                        width: root.graph-range-inset;
+                        vertical-stretch: 1;
+                        range-dock := Rectangle {
+                            x: -1px;
+                            y: (parent.height - self.height) / 2;
+                            width: parent.width + 1px;
+                            height: 56px;
+                            border-width: 1px;
+                            border-color: Graphite.border;
+                            border-top-right-radius: 6px;
+                            border-bottom-right-radius: 6px;
+                            background: Graphite.window;
+                            VerticalLayout {
+                                padding-left: 13px;
+                                padding-right: 8px;
+                                spacing: 4px;
+                                alignment: center;
+                                GraphLabel { text: "± dB"; horizontal-alignment: center; }
+                                SpinBox {
+                                    width: 68px;
+                                    minimum: 1;
+                                    maximum: 24;
+                                    value <=> root.eq-range-db;
+                                    accessible-label: "EQ graph range in dB";
+                                    Tooltip { text: @markdown("Set the gain range above and below the graph center. Smaller values make vertical adjustments finer."); }
+                                    edited(value) => {
+                                        root.change-eq-range();
+                                        root.save-graph-view();
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 HorizontalLayout {
                     padding-left: root.graph-axis-inset;
+                    padding-right: root.graph-range-inset;
                     Rectangle {
                         height: 16px; horizontal-stretch: 1;
                         GraphLabel { text: "20 Hz"; x: 0px; }
@@ -1330,6 +1410,10 @@ export component MainWindow inherits Window {
             }
         }
         if !root.simple-layout && root.notice != "": Text { text: root.notice; color: Appearance.accent; wrap: word-wrap; font-size: 12px; }
+        if root.has-now-playing && root.narrow: NowPlayingPanel {
+            height: 56px;
+            details: root.playback-details;
+        }
         Rectangle { min-height: 0px; vertical-stretch: 1; }
         HorizontalLayout {
             spacing: 8px;
@@ -1343,7 +1427,8 @@ export component MainWindow inherits Window {
         x: root.page-inset;
         y: root.page-inset + (root.simple-layout ? 0px : window-scroll.content-y);
         width: window-scroll.visible-width - 2 * root.page-inset;
-        height: root.narrow ? 142px : 118px;
+        height: (root.narrow ? 142px : 118px)
+            + (root.test-tone-open ? self.spacing + root.test-tone-height : 0px);
         spacing: root.narrow ? 8px : 14px;
         toolbar := Panel {
             height: root.narrow ? 92px : 56px;
@@ -1419,7 +1504,7 @@ export component MainWindow inherits Window {
             spacing: Graphite.control-gap;
             cross-axis-alignment: center;
             equalizer-box := Panel {
-                width: 232px;
+                width: root.narrow && root.has-test-tone ? 176px : 232px;
                 height: parent.height;
                 HorizontalLayout {
                     padding-left: Graphite.panel-inset; padding-right: 8px;
@@ -1443,13 +1528,67 @@ export component MainWindow inherits Window {
                     }
                 }
             }
+            if root.has-test-tone: Button {
+                text: "Test Tone";
+                width: 90px; height: 32px;
+                primary: root.test-tone-open;
+                Tooltip { text: @markdown("Open the test tone controls to listen while editing EQ."); }
+                clicked => {
+                    root.test-tone-open = !root.test-tone-open;
+                    if (!root.test-tone-open) { root.play-test-tone(false); }
+                }
+            }
             if root.short && root.show-live-view: Button {
                 text: root.open-short-monitor ? "Hide Live Monitor" : "Show Live Monitor";
                 accessible-label: root.open-short-monitor ? "Collapse Live Monitor" : "Expand Live Monitor";
                 height: 32px;
                 clicked => { root.open-short-monitor = !root.open-short-monitor; }
             }
-            Rectangle { horizontal-stretch: 1; }
+            if root.has-now-playing && !root.narrow: NowPlayingPanel {
+                horizontal-stretch: 1;
+                height: parent.height;
+                details: root.playback-details;
+            }
+            if !root.has-now-playing || root.narrow: Rectangle { horizontal-stretch: 1; }
+        }
+        if root.test-tone-open: Panel {
+            height: root.test-tone-height;
+            VerticalLayout {
+                padding-left: Graphite.panel-inset;
+                padding-right: Graphite.panel-inset;
+                spacing: 2px;
+                HorizontalLayout {
+                    height: 48px;
+                    spacing: 8px;
+                    cross-axis-alignment: center;
+                    Label { text: "Frequency"; }
+                    SpinBox {
+                        width: 108px;
+                        accessible-label: "Test tone frequency in hertz";
+                        minimum: 20; maximum: 20000;
+                        step-size: 10;
+                        value <=> root.test-tone-frequency;
+                        edited(value) => { root.change-test-tone-frequency(value); }
+                    }
+                    Label { text: "Hz"; }
+                    Button {
+                        text: root.test-tone-playing ? "Stop" : "Play";
+                        accessible-label: root.test-tone-playing ? "Stop test tone" : "Play test tone";
+                        width: 64px; height: 32px;
+                        primary: root.test-tone-playing;
+                        enabled: root.test-tone-playing || (root.connected && root.active-output-label != "");
+                        Tooltip { text: @markdown("Play a quiet sine wave for up to 30 seconds. Press Escape to stop."); }
+                        clicked => { root.play-test-tone(!root.test-tone-playing); }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    if root.test-tone-playing: Label { text: "Playing"; color: Appearance.accent; }
+                }
+                if root.test-tone-error != "": Label {
+                    text: root.test-tone-error;
+                    color: Appearance.accent;
+                    wrap: word-wrap;
+                }
+            }
         }
     }
     }

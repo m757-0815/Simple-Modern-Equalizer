@@ -8,6 +8,7 @@ URL:            https://github.com/m757-0815/Simple-Modern-Equalizer
 BuildRequires:  desktop-file-utils
 Requires:       hicolor-icon-theme
 Requires:       pipewire
+Requires:       pipewire-utils
 
 %description
 Adjust system audio with tone controls, a parametric equalizer,
