@@ -22,12 +22,17 @@ jobs:
       - name: Build Windows installer
         shell: pwsh
         run: ./scripts/build-windows.ps1
-      - uses: actions/upload-artifact@v4
+      - name: Upload Windows MSI
+        uses: actions/upload-artifact@v7
         with:
-          name: Simple-Modern-Equalizer-Windows-x64
-          path: |
-            dist/SimpleModernEqualizer-Setup-x64.msi
-            dist/windows/simple-modern-equalizer.exe
+          path: dist/SimpleModernEqualizer-Setup-x64.msi
+          archive: false
+          if-no-files-found: error
+      - name: Upload Windows executable
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/windows/simple-modern-equalizer.exe
+          archive: false
           if-no-files-found: error
 
   appimage:
@@ -41,10 +46,11 @@ jobs:
           sudo apt-get install -y libpipewire-0.3-dev libspa-0.2-dev libclang-dev libudev-dev libxkbcommon-dev libfontconfig1-dev libgl1-mesa-dev squashfs-tools
       - name: Build AppImage
         run: sh scripts/build-appimage.sh
-      - uses: actions/upload-artifact@v4
+      - name: Upload Linux AppImage
+        uses: actions/upload-artifact@v7
         with:
-          name: Simple-Modern-Equalizer-AppImage-x86_64
-          path: dist/*.AppImage
+          path: dist/Simple-Modern-Equalizer-x86_64.AppImage
+          archive: false
           if-no-files-found: error
 
   fedora:
@@ -65,10 +71,11 @@ jobs:
           dnf install -y dist/*.rpm
           test -x /usr/bin/simple-modern-equalizer
           test -x /usr/libexec/simple-modern-equalizer/resonanced
-      - uses: actions/upload-artifact@v4
+      - name: Upload Fedora RPM
+        uses: actions/upload-artifact@v7
         with:
-          name: Simple-Modern-Equalizer-Fedora-x86_64
           path: dist/*.rpm
+          archive: false
           if-no-files-found: error
 
   deb:
@@ -105,10 +112,11 @@ jobs:
           test -x /usr/bin/simple-modern-equalizer
           test -x /usr/lib/simple-modern-equalizer/resonanced
           test -s /usr/share/icons/hicolor/256x256/apps/simple-modern-equalizer.png
-      - uses: actions/upload-artifact@v4
+      - name: Upload distribution package
+        uses: actions/upload-artifact@v7
         with:
-          name: Simple-Modern-Equalizer-${{ matrix.platform }}-amd64
           path: dist/*.deb
+          archive: false
           if-no-files-found: error
 
   source:
@@ -116,8 +124,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: git archive --prefix=Simple-Modern-Equalizer/ -o Simple-Modern-Equalizer-source.tar.gz HEAD
-      - uses: actions/upload-artifact@v4
+      - name: Upload source archive
+        uses: actions/upload-artifact@v7
         with:
-          name: Simple-Modern-Equalizer-Source
           path: Simple-Modern-Equalizer-source.tar.gz
+          archive: false
           if-no-files-found: error

@@ -12,18 +12,18 @@ Simple Modern Equalizer is a free, open-source system-wide audio equalizer for h
 
 ### Downloads
 
-The v0.1.15 downloads are GitHub Actions ZIP artifacts. Sign in to GitHub to download them, then extract the package. [Build installers runs](https://github.com/m757-0815/Simple-Modern-Equalizer/actions/workflows/package.yml)
+Sign in to GitHub, open a successful **Build installers** run, and download your package from **Artifacts**. New runs offer the files individually. [Build installers runs](https://github.com/m757-0815/Simple-Modern-Equalizer/actions/workflows/package.yml)
 
 | Target | Package |
 | --- | --- |
-| Windows x86-64 MSI | [Download Windows MSI](https://github.com/m757-0815/Simple-Modern-Equalizer/actions/runs/45378075492/artifacts/14913157219) |
-| Linux x86-64 AppImage | [Download Linux AppImage](https://github.com/m757-0815/Simple-Modern-Equalizer/actions/runs/45378075492/artifacts/14913266153) |
-| Fedora 44 x86-64 RPM | [Download Fedora RPM](https://github.com/m757-0815/Simple-Modern-Equalizer/actions/runs/45378075492/artifacts/14911689092) |
-| Ubuntu 24.04 x86-64 DEB | [Ubuntu build script](scripts/build-deb.sh) |
-| Debian 13 x86-64 DEB | [Debian build script](scripts/build-deb.sh) |
-| Source | [Download source archive](https://github.com/m757-0815/Simple-Modern-Equalizer/actions/runs/45378075492/artifacts/14912721672) |
+| Windows x86-64 MSI | `SimpleModernEqualizer-Setup-x64.msi` |
+| Linux x86-64 AppImage | `Simple-Modern-Equalizer-x86_64.AppImage` |
+| Fedora 44 x86-64 RPM | `simple-modern-equalizer-*.x86_64.rpm` |
+| Ubuntu 24.04 x86-64 DEB | `simple-modern-equalizer_*+ubuntu24.04_amd64.deb` |
+| Debian 13 x86-64 DEB | `simple-modern-equalizer_*+debian13_amd64.deb` |
+| Source | `Simple-Modern-Equalizer-source.tar.gz` |
 
-The Ubuntu and Debian jobs are available in **Build installers**. Local builds are in `dist/`.
+Local installer builds are in `dist/`.
 
 ### Linux AppImage
 
