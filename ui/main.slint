@@ -580,7 +580,6 @@ export component MainWindow inherits Window {
     private property <bool> short: self.height < 500px;
     private property <length> page-inset: self.narrow ? 10px : 18px;
     private property <length> graph-axis-inset: self.narrow ? 42px : 58px;
-    private property <length> graph-range-inset: 88px;
     private property <bool> open-short-monitor;
     out property <bool> live-monitor-expanded: root.show-live-view && (!root.short || root.open-short-monitor);
     private property <length> graph-height: (self.short
@@ -618,13 +617,16 @@ export component MainWindow inherits Window {
         title: "No track reported", artist: "", sample-rate: "—", bit-depth: "—"
     };
     in property <bool> has-test-tone;
+    in-out property <bool> show-test-tone: true;
     in property <bool> test-tone-playing;
     in property <string> test-tone-error;
     in-out property <int> test-tone-frequency: 1000;
-    private property <bool> test-tone-open;
-    private property <length> test-tone-height: root.test-tone-error == "" ? 48px : 96px;
+    in-out property <int> test-tone-duration: 30;
+    in-out property <int> test-tone-level: -36;
+    in-out property <float> test-tone-height: 132;
     callback play-test-tone(bool);
     callback change-test-tone-frequency(int);
+    callback change-test-tone-level(int);
     in-out property <bool> show-band-list: true;
     in property <bool> spline-eq;
     in-out property <bool> show-levels: true;
@@ -926,6 +928,83 @@ export component MainWindow inherits Window {
                 }
             }
         }
+        if root.has-test-tone && root.show-test-tone: test-tone-panel := Panel {
+            height: max(root.test-tone-height * 1px, test-tone-content.min-height);
+            test-tone-content := VerticalLayout {
+                padding-left: Graphite.panel-inset;
+                padding-right: Graphite.panel-inset;
+                padding-top: 10px;
+                spacing: 7px;
+                HorizontalLayout {
+                    height: 32px;
+                    cross-axis-alignment: center;
+                    PanelHeading { text: "Test Tone"; }
+                    Rectangle { horizontal-stretch: 1; }
+                    Button {
+                        text: root.test-tone-playing ? "Stop" : "Play";
+                        accessible-label: root.test-tone-playing ? "Stop test tone" : "Play test tone";
+                        width: 72px; height: 32px;
+                        primary: root.test-tone-playing;
+                        enabled: root.test-tone-playing || (root.connected && root.active-output-label != "");
+                        Tooltip { text: @markdown("Play a sine wave through the current EQ. Press Escape to stop."); }
+                        clicked => { root.play-test-tone(!root.test-tone-playing); }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 12px;
+                    VerticalLayout {
+                        spacing: 4px;
+                        GraphLabel { text: "Frequency (Hz)"; }
+                        SpinBox {
+                            width: 96px;
+                            accessible-label: "Test tone frequency in hertz";
+                            minimum: 20; maximum: 20000; step-size: 10;
+                            value <=> root.test-tone-frequency;
+                            edited(value) => {
+                                root.change-test-tone-frequency(value);
+                                root.save-graph-view();
+                            }
+                        }
+                    }
+                    VerticalLayout {
+                        spacing: 4px;
+                        GraphLabel { text: "Level (dBFS)"; }
+                        SpinBox {
+                            width: 96px;
+                            accessible-label: "Test tone level in dBFS";
+                            minimum: -60; maximum: -24;
+                            value <=> root.test-tone-level;
+                            Tooltip { text: @markdown("Set the tone level before equalization."); }
+                            edited(value) => {
+                                root.change-test-tone-level(value);
+                                root.save-graph-view();
+                            }
+                        }
+                    }
+                    VerticalLayout {
+                        spacing: 4px;
+                        GraphLabel { text: "Duration (s)"; }
+                        SpinBox {
+                            width: 96px;
+                            accessible-label: "Test tone duration in seconds";
+                            minimum: 1; maximum: 60;
+                            enabled: !root.test-tone-playing;
+                            value <=> root.test-tone-duration;
+                            edited(value) => { root.save-graph-view(); }
+                        }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+                if root.test-tone-error != "": Label {
+                    text: root.test-tone-error; color: Appearance.accent; wrap: word-wrap;
+                }
+                Rectangle { vertical-stretch: 1; }
+                ResizeGrip {
+                    panel-height <=> root.test-tone-height; minimum: 124; maximum: 260;
+                    label: "Test Tone height"; resized => { root.save-graph-view(); }
+                }
+            }
+        }
         if root.simple-layout: tone-panel := Panel {
             vertical-stretch: 0;
             VerticalLayout {
@@ -970,7 +1049,7 @@ export component MainWindow inherits Window {
                 }
             }
         }
-        if !root.simple-layout: Panel {
+        if !root.simple-layout: eq-graph-panel := Panel {
             background: Graphite.window;
             height: root.graph-height + (root.show-clipping ? 175px : 136px) - (root.short ? 23px : 0px);
             VerticalLayout {
@@ -997,6 +1076,19 @@ export component MainWindow inherits Window {
                         Tooltip { text: @markdown("Largest difference from the reference curve on the fitting grid."); }
                     }
                     Rectangle { horizontal-stretch: 1; }
+                    GraphLabel { text: "± dB"; }
+                    SpinBox {
+                        width: 68px;
+                        minimum: 1;
+                        maximum: 24;
+                        value <=> root.eq-range-db;
+                        accessible-label: "EQ graph range in dB";
+                        Tooltip { text: @markdown("Set the gain range above and below the graph center. Smaller values make vertical adjustments finer."); }
+                        edited(value) => {
+                            root.change-eq-range();
+                            root.save-graph-view();
+                        }
+                    }
                 }
                 HorizontalLayout {
                     height: 17px;
@@ -1144,44 +1236,9 @@ export component MainWindow inherits Window {
                             }
                         }
                     }
-                    Rectangle {
-                        width: root.graph-range-inset;
-                        vertical-stretch: 1;
-                        range-dock := Rectangle {
-                            x: -1px;
-                            y: (parent.height - self.height) / 2;
-                            width: parent.width + 1px;
-                            height: 56px;
-                            border-width: 1px;
-                            border-color: Graphite.border;
-                            border-top-right-radius: 6px;
-                            border-bottom-right-radius: 6px;
-                            background: Graphite.window;
-                            VerticalLayout {
-                                padding-left: 13px;
-                                padding-right: 8px;
-                                spacing: 4px;
-                                alignment: center;
-                                GraphLabel { text: "± dB"; horizontal-alignment: center; }
-                                SpinBox {
-                                    width: 68px;
-                                    minimum: 1;
-                                    maximum: 24;
-                                    value <=> root.eq-range-db;
-                                    accessible-label: "EQ graph range in dB";
-                                    Tooltip { text: @markdown("Set the gain range above and below the graph center. Smaller values make vertical adjustments finer."); }
-                                    edited(value) => {
-                                        root.change-eq-range();
-                                        root.save-graph-view();
-                                    }
-                                }
-                            }
-                        }
-                    }
                 }
                 HorizontalLayout {
                     padding-left: root.graph-axis-inset;
-                    padding-right: root.graph-range-inset;
                     Rectangle {
                         height: 16px; horizontal-stretch: 1;
                         GraphLabel { text: "20 Hz"; x: 0px; }
@@ -1427,8 +1484,7 @@ export component MainWindow inherits Window {
         x: root.page-inset;
         y: root.page-inset + (root.simple-layout ? 0px : window-scroll.content-y);
         width: window-scroll.visible-width - 2 * root.page-inset;
-        height: (root.narrow ? 142px : 118px)
-            + (root.test-tone-open ? self.spacing + root.test-tone-height : 0px);
+        height: root.narrow ? 142px : 118px;
         spacing: root.narrow ? 8px : 14px;
         toolbar := Panel {
             height: root.narrow ? 92px : 56px;
@@ -1504,7 +1560,7 @@ export component MainWindow inherits Window {
             spacing: Graphite.control-gap;
             cross-axis-alignment: center;
             equalizer-box := Panel {
-                width: root.narrow && root.has-test-tone ? 176px : 232px;
+                width: 232px;
                 height: parent.height;
                 HorizontalLayout {
                     padding-left: Graphite.panel-inset; padding-right: 8px;
@@ -1528,16 +1584,6 @@ export component MainWindow inherits Window {
                     }
                 }
             }
-            if root.has-test-tone: Button {
-                text: "Test Tone";
-                width: 90px; height: 32px;
-                primary: root.test-tone-open;
-                Tooltip { text: @markdown("Open the test tone controls to listen while editing EQ."); }
-                clicked => {
-                    root.test-tone-open = !root.test-tone-open;
-                    if (!root.test-tone-open) { root.play-test-tone(false); }
-                }
-            }
             if root.short && root.show-live-view: Button {
                 text: root.open-short-monitor ? "Hide Live Monitor" : "Show Live Monitor";
                 accessible-label: root.open-short-monitor ? "Collapse Live Monitor" : "Expand Live Monitor";
@@ -1550,45 +1596,6 @@ export component MainWindow inherits Window {
                 details: root.playback-details;
             }
             if !root.has-now-playing || root.narrow: Rectangle { horizontal-stretch: 1; }
-        }
-        if root.test-tone-open: Panel {
-            height: root.test-tone-height;
-            VerticalLayout {
-                padding-left: Graphite.panel-inset;
-                padding-right: Graphite.panel-inset;
-                spacing: 2px;
-                HorizontalLayout {
-                    height: 48px;
-                    spacing: 8px;
-                    cross-axis-alignment: center;
-                    Label { text: "Frequency"; }
-                    SpinBox {
-                        width: 108px;
-                        accessible-label: "Test tone frequency in hertz";
-                        minimum: 20; maximum: 20000;
-                        step-size: 10;
-                        value <=> root.test-tone-frequency;
-                        edited(value) => { root.change-test-tone-frequency(value); }
-                    }
-                    Label { text: "Hz"; }
-                    Button {
-                        text: root.test-tone-playing ? "Stop" : "Play";
-                        accessible-label: root.test-tone-playing ? "Stop test tone" : "Play test tone";
-                        width: 64px; height: 32px;
-                        primary: root.test-tone-playing;
-                        enabled: root.test-tone-playing || (root.connected && root.active-output-label != "");
-                        Tooltip { text: @markdown("Play a quiet sine wave for up to 30 seconds. Press Escape to stop."); }
-                        clicked => { root.play-test-tone(!root.test-tone-playing); }
-                    }
-                    Rectangle { horizontal-stretch: 1; }
-                    if root.test-tone-playing: Label { text: "Playing"; color: Appearance.accent; }
-                }
-                if root.test-tone-error != "": Label {
-                    text: root.test-tone-error;
-                    color: Appearance.accent;
-                    wrap: word-wrap;
-                }
-            }
         }
     }
     }
@@ -1655,6 +1662,13 @@ export component MainWindow inherits Window {
                                 text: "Live Monitor"; checked <=> root.show-live-view;
                                 Tooltip { text: @markdown("Live visualizations can increase CPU use. Turn off Live Monitor to reduce it."); }
                                 toggled => { root.change-live-view(self.checked); }
+                            }
+                            if root.has-test-tone: CheckBox {
+                                text: "Test Tone"; checked <=> root.show-test-tone;
+                                toggled => {
+                                    if (!self.checked) { root.play-test-tone(false); }
+                                    root.save-graph-view();
+                                }
                             }
                             CheckBox { text: "Band list"; checked <=> root.show-band-list; }
                             CheckBox { text: "Preamp and balance"; checked <=> root.show-levels; }

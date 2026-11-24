@@ -23,7 +23,7 @@ mod ui_tests;
 
 use config::Config;
 use plot_canvas::RasterSize;
-use presets::{DisplayPreferences, Preferences, Preset};
+use presets::{DisplayPreferences, Preferences, Preset, TestTonePreferences};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::{cell::RefCell, collections::VecDeque, fs, path::{Path, PathBuf}, rc::Rc, sync::mpsc, time::{Duration, Instant}};
 slint::include_modules!();
@@ -182,17 +182,23 @@ impl App {
         Ok(())
     }
 
-    fn save_graph_view(&mut self, eq: f32, live: f32, range: i32) -> Result<(), String> {
-        let eq = eq.round().max(130.0) as i32;
-        let live = live.round().clamp(146.0, 420.0) as i32;
-        let range = range.clamp(1, 24);
+    fn save_graph_view(&mut self, ui: &MainWindow) -> Result<(), String> {
+        let eq = ui.get_eq_plot_height().round().max(130.0) as i32;
+        let live = ui.get_live_view_height().round().clamp(146.0, 420.0) as i32;
+        let range = ui.get_eq_range_db().clamp(1, 24);
+        let tone = TestTonePreferences {
+            visible: ui.get_show_test_tone(),
+            height: ui.get_test_tone_height().round() as i32,
+            settings: test_tone_settings(ui),
+        }.normalized();
         if eq != self.preferences.eq_plot_height || live != self.preferences.live_view_height() as i32
-            || range != self.preferences.eq_range_db
+            || range != self.preferences.eq_range_db || tone != self.preferences.test_tone
         {
             let mut preferences = self.preferences.clone();
             preferences.eq_plot_height = eq;
             preferences.live_view_height = Some(live);
             preferences.eq_range_db = range;
+            preferences.test_tone = tone;
             preferences.save(&self.directory)?;
             self.preferences = preferences;
         }
@@ -336,6 +342,14 @@ fn band_row(cfg: &Config, index: usize, decimals: usize) -> BandRow {
         kind: match band.kind.as_str() { "LS" => 1, "HS" => 2, _ => 0 },
         enabled: band.enabled,
         locked: cfg.locked_point(index),
+    }
+}
+
+fn test_tone_settings(ui: &MainWindow) -> test_tone::Settings {
+    test_tone::Settings {
+        frequency: ui.get_test_tone_frequency(),
+        duration: ui.get_test_tone_duration(),
+        level: ui.get_test_tone_level(),
     }
 }
 
@@ -819,6 +833,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let state = app.borrow();
         ui.set_live_view_height(state.preferences.live_view_height());
         ui.set_eq_plot_height(state.preferences.eq_plot_height());
+        let tone = state.preferences.test_tone.normalized();
+        ui.set_show_test_tone(tone.visible);
+        ui.set_test_tone_height(tone.height as f32);
+        ui.set_test_tone_frequency(tone.settings.frequency);
+        ui.set_test_tone_duration(tone.settings.duration);
+        ui.set_test_tone_level(tone.settings.level);
         let display = &state.preferences.display;
         ui.set_live_mode(display.live_mode_index());
         ui.set_show_band_list(display.band_list);
@@ -891,8 +911,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let app = app.clone();
             timer.start(slint::TimerMode::SingleShot, Duration::from_millis(250), move || {
                 if let Some(w) = weak.upgrade()
-                    && let Err(error) = app.borrow_mut().save_graph_view(
-                        w.get_eq_plot_height(), w.get_live_view_height(), w.get_eq_range_db())
+                    && let Err(error) = app.borrow_mut().save_graph_view(&w)
                 {
                     w.set_notice(error.into());
                 }
@@ -950,10 +969,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         let started = a.active_output.clone().filter(|_| w.get_connected())
             .ok_or_else(|| "Choose an available audio output to play a test tone.".to_string())
-            .and_then(|output| a.test_tone.start(&output, w.get_test_tone_frequency()));
+            .and_then(|output| a.test_tone.start(&output, test_tone_settings(&w)));
         w.set_test_tone_playing(started.is_ok());
         match started {
-            Ok(frequency) => w.set_test_tone_frequency(frequency),
+            Ok(frequency) if frequency != w.get_test_tone_frequency() => {
+                w.set_test_tone_frequency(frequency);
+                w.invoke_save_graph_view();
+            }
+            Ok(_) => {}
             Err(error) => w.set_test_tone_error(error.into()),
         }
     });
@@ -963,6 +986,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             w.set_test_tone_frequency(actual);
         }
     });
+    on_ui_action!(on_change_test_tone_level, |_w, a, level| { a.test_tone.change_level(level); });
     on_ui_action!(on_finish_edit, |_w, a, | { a.edit_group = None; });
     on_ui_action!(on_undo, |w, a, | {
         match a.undo_edit() {
@@ -1516,7 +1540,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         preset_button: ui.get_show_preset_button(),
         eq_spectrum: ui.get_show_eq_spectrum(),
     };
-    a.save_graph_view(ui.get_eq_plot_height(), ui.get_live_view_height(), ui.get_eq_range_db())?;
+    a.save_graph_view(&ui)?;
     a.preferences.save(&a.directory)?;
     Ok(())
 }

@@ -2,11 +2,14 @@ use crate::config::{Band, Config, SplineSource};
 use crate::plot_canvas::{Canvas, RasterSize};
 use crate::theme::{PLOT_GRID, PLOT_ZERO, ThemeColors};
 use slint::{Rgba8Pixel, SharedPixelBuffer};
+use std::sync::LazyLock;
 use tiny_skia::{Path, PathBuilder};
 
 const MAX_GAIN_DB: f64 = 24.0;
 const W: usize = 1920;
 const H: usize = 260;
+static RESPONSE_FREQUENCIES: LazyLock<[f64; W]> =
+    LazyLock::new(|| std::array::from_fn(|x| 20.0 * 1000.0_f64.powf(x as f64 / (W - 1) as f64)));
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct GainAxis {
@@ -133,6 +136,7 @@ pub struct GraphCache {
     sample_rate: f64,
     pub axis: GainAxis,
     curve: Vec<f64>,
+    curve_path: Option<Path>,
     rendered_spectrum: Vec<f32>,
     rendered_size: Option<RasterSize>,
     colors: ThemeColors,
@@ -144,6 +148,7 @@ impl GraphCache {
         let axis = GainAxis::new(range);
         if self.axis != axis {
             self.axis = axis;
+            self.curve_path = None;
             self.rendered_size = None;
         }
     }
@@ -168,7 +173,9 @@ impl GraphCache {
         if self.sample_rate == 0.0 {
             return false;
         }
-        let dots: Vec<_> = cfg.bands.iter().map(|band| {
+        let mut changed = self.dots.len() != cfg.bands.len();
+        self.dots.truncate(cfg.bands.len());
+        for (index, band) in cfg.bands.iter().enumerate() {
             let (x, _) = position(band.frequency_hz, band.gain_db);
             let y = if cfg.spline && !cfg.bypass && !self.curve.is_empty() {
                 // The sampled curve includes both editors' filters. The saved
@@ -183,13 +190,15 @@ impl GraphCache {
             } else {
                 self.axis.y(band.gain_db)
             };
-            Dot { x, y, enabled: !cfg.bypass && band.enabled }
-        }).collect();
-        if self.dots == dots {
-            return false;
+            let dot = Dot { x, y, enabled: !cfg.bypass && band.enabled };
+            if let Some(previous) = self.dots.get_mut(index) {
+                changed |= *previous != dot;
+                *previous = dot;
+            } else {
+                self.dots.push(dot);
+            }
         }
-        self.dots = dots;
-        true
+        changed
     }
 
     pub fn frame(&mut self, cfg: &Config, spectrum: &[f32], sample_rate: f64, size: RasterSize) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
@@ -198,18 +207,16 @@ impl GraphCache {
         let direct_points = cfg.spline_points().filter(|_| !cfg.bypass
             && cfg.spline_source.is_none() && cfg.parametric_bands().is_empty());
         // Keep EQ geometry in band-gain coordinates; the scale includes effective preamp.
-        let changed = self.sample_rate == 0.0 || self.bypass != cfg.bypass || self.spline != cfg.spline ||
+        let shape_changed = self.sample_rate == 0.0 || self.bypass != cfg.bypass || self.spline != cfg.spline ||
             self.bands != cfg.bands || self.spline_source != cfg.spline_source ||
-            self.other_mode_bands != cfg.other_mode_bands ||
-            self.output_offset != preamp || (!cfg.bypass && self.sample_rate != rate);
-        if changed {
-            self.output_offset = preamp;
+            self.other_mode_bands != cfg.other_mode_bands || (!cfg.bypass && self.sample_rate != rate);
+        if shape_changed {
             self.curve = if direct_points.is_some() {
                 Vec::new()
             } else if cfg.bypass {
                 vec![0.0; W]
             } else {
-                let frequencies = (0..W).map(|x| (20.0 * 1000.0_f64.powf(x as f64 / (W - 1) as f64)).min(rate / 2.0));
+                let frequencies = RESPONSE_FREQUENCIES.iter().map(|&frequency| frequency.min(rate / 2.0));
                 cfg.response(frequencies, rate)
             };
             self.bands.clone_from(&cfg.bands);
@@ -218,20 +225,24 @@ impl GraphCache {
             self.bypass = cfg.bypass;
             self.spline = cfg.spline;
             self.sample_rate = rate;
+            self.curve_path = None;
         }
         let visible = if spectrum.iter().any(|&level| level > 0.0) { spectrum } else { &[] };
-        if !changed && visible == self.rendered_spectrum && self.rendered_size == Some(size) {
+        if !shape_changed && self.output_offset == preamp && visible == self.rendered_spectrum && self.rendered_size == Some(size) {
             return None;
         }
+        self.output_offset = preamp;
         self.rendered_spectrum.clear();
         self.rendered_spectrum.extend_from_slice(visible);
         self.rendered_size = Some(size);
-        let path = if let Some(points) = direct_points {
-            band_spline(points, self.axis)
-        } else {
-            response_path(&self.curve, self.axis)
-        };
-        Some(render(path.as_ref(), self.axis, self.output_offset, cfg.bypass, visible, size, self.colors))
+        if self.curve_path.is_none() {
+            self.curve_path = if let Some(points) = direct_points {
+                band_spline(points, self.axis)
+            } else {
+                response_path(&self.curve, self.axis)
+            };
+        }
+        Some(render(self.curve_path.as_ref(), self.axis, self.output_offset, cfg.bypass, visible, size, self.colors))
     }
 }
 

@@ -312,7 +312,7 @@ fn preamp_spinbox_steps_by_005_and_auto_headroom_locks_controls() {
 }
 
 #[test]
-fn eq_range_spinbox_stays_attached_to_the_graphs_right_edge() {
+fn eq_range_spinbox_stays_in_the_graph_panels_top_right() {
     let ui = window();
     ui.set_show_live_view(false);
     ui.set_spline_eq(true);
@@ -323,18 +323,19 @@ fn eq_range_spinbox_stays_attached_to_the_graphs_right_edge() {
     ui.show().unwrap();
 
     let range = element(&ui, "EQ graph range in dB", AccessibleRole::Spinbox);
+    let panel = ElementHandle::find_by_element_id(&ui, "MainWindow::eq-graph-panel").next().unwrap();
     let graph = ElementHandle::find_by_element_id(&ui, "MainWindow::plot").next().unwrap();
-    let dock = ElementHandle::find_by_element_id(&ui, "MainWindow::range-dock").next().unwrap();
+    let mode = element(&ui, "Use Parametric From EQ Graph", AccessibleRole::Button);
     for (width, height) in [(1120.0, 920.0), (480.0, 360.0)] {
         ui.window().set_size(LogicalSize::new(width, height));
-        let graph_position = graph.absolute_position();
-        let graph_right = graph_position.x + graph.size().width;
         let range_position = range.absolute_position();
-        assert!((dock.absolute_position().x - graph_right + 1.0).abs() < 0.1);
-        assert!(range_position.x >= graph_right + 10.0);
-        assert!(range_position.x + range.size().width <= width - 10.0);
-        assert!(range_position.y >= graph_position.y);
-        assert!(range_position.y + range.size().height <= graph_position.y + graph.size().height);
+        let range_right = range_position.x + range.size().width;
+        let panel_right = panel.absolute_position().x + panel.size().width;
+        assert!((panel_right - range_right - 14.0).abs() < 0.1);
+        assert!((graph.absolute_position().x + graph.size().width - range_right).abs() < 0.1);
+        assert!(range_position.y >= panel.absolute_position().y + 14.0);
+        assert!(range_position.y + range.size().height <= graph.absolute_position().y);
+        assert!(range_position.x >= mode.absolute_position().x + mode.size().width);
     }
     assert_eq!(ui.get_eq_range_db(), 24);
     range.set_accessible_value("1");
@@ -380,9 +381,8 @@ fn now_playing_shows_output_bit_depth_in_both_layouts() {
 }
 
 #[test]
-fn test_tone_controls_fit_a_small_window_and_stop_on_dismissal() {
+fn test_tone_panel_is_between_the_plots_and_keeps_its_settings_when_hidden() {
     let ui = window();
-    ui.window().set_size(LogicalSize::new(480.0, 360.0));
     ui.set_has_test_tone(true);
     ui.set_connected(true);
     ui.set_active_output_label("Speakers".into());
@@ -395,23 +395,46 @@ fn test_tone_controls_fit_a_small_window_and_stop_on_dismissal() {
     });
     ui.show().unwrap();
 
-    let toggle = element(&ui, "Test Tone", AccessibleRole::Button);
-    toggle.invoke_accessible_default_action();
-    let monitor = element(&ui, "Expand Live Monitor", AccessibleRole::Button);
-    assert!(monitor.absolute_position().x + monitor.size().width <= 480.0);
+    let live = ElementHandle::find_by_element_id(&ui, "MainWindow::live-view").next().unwrap();
+    let tone = ElementHandle::find_by_element_id(&ui, "MainWindow::test-tone-panel").next().unwrap();
+    let graph = ElementHandle::find_by_element_id(&ui, "MainWindow::eq-graph-panel").next().unwrap();
+    assert!(live.absolute_position().y + live.size().height < tone.absolute_position().y);
+    assert!(tone.absolute_position().y + tone.size().height < graph.absolute_position().y);
+    let height = tone.size().height;
+    let graph_top = graph.absolute_position().y;
+    element(&ui, "Test Tone height", AccessibleRole::Slider).invoke_accessible_increment_action();
+    assert_eq!(tone.size().height, height + 10.0);
+    assert_eq!(graph.absolute_position().y, graph_top + 10.0);
+
+    ui.window().set_size(LogicalSize::new(480.0, 360.0));
     let pitch = element(&ui, "Test tone frequency in hertz", AccessibleRole::Spinbox);
+    let level = element(&ui, "Test tone level in dBFS", AccessibleRole::Spinbox);
+    let duration = element(&ui, "Test tone duration in seconds", AccessibleRole::Spinbox);
     pitch.set_accessible_value("125");
+    level.set_accessible_value("-42");
+    duration.set_accessible_value("12");
     assert_eq!(ui.get_test_tone_frequency(), 125);
+    assert_eq!(ui.get_test_tone_level(), -42);
+    assert_eq!(ui.get_test_tone_duration(), 12);
+    assert!(duration.absolute_position().x + duration.size().width <= 480.0);
     let play = element(&ui, "Play test tone", AccessibleRole::Button);
     assert!(play.absolute_position().x + play.size().width <= 480.0);
     play.invoke_accessible_default_action();
     assert!(ui.get_test_tone_playing());
+    assert_eq!(duration.accessible_enabled(), Some(false));
     key(&ui, Key::Escape);
     assert!(!ui.get_test_tone_playing());
     play.invoke_accessible_default_action();
+    open_settings(&ui);
+    let toggle = element(&ui, "Test Tone", AccessibleRole::Checkbox);
     toggle.invoke_accessible_default_action();
     assert!(!ui.get_test_tone_playing());
+    assert!(!ui.get_show_test_tone());
     assert_eq!(*playback.borrow(), [true, false, true, false]);
+    toggle.invoke_accessible_default_action();
+    assert!(ui.get_show_test_tone());
+    assert_eq!(ui.get_test_tone_height(), height + 10.0);
+    assert_eq!(ui.get_test_tone_duration(), 12);
 }
 
 #[test]

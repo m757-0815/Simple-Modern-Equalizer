@@ -93,8 +93,29 @@ pub struct Preferences {
     pub live_view_height: Option<i32>,
     pub eq_plot_height: i32,
     pub eq_range_db: i32,
+    pub test_tone: TestTonePreferences,
     pub display: DisplayPreferences,
     pub colors: crate::theme::ThemeColors,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct TestTonePreferences {
+    pub visible: bool,
+    pub height: i32,
+    pub settings: crate::test_tone::Settings,
+}
+
+impl Default for TestTonePreferences {
+    fn default() -> Self {
+        Self { visible: true, height: 132, settings: crate::test_tone::Settings::default() }
+    }
+}
+
+impl TestTonePreferences {
+    pub fn normalized(self) -> Self {
+        Self { height: self.height.clamp(124, 260), settings: self.settings.normalized(), ..self }
+    }
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -134,6 +155,7 @@ impl Default for Preferences {
             live_view_height: None,
             eq_plot_height: DEFAULT_EQ_PLOT_HEIGHT,
             eq_range_db: 24,
+            test_tone: TestTonePreferences::default(),
             display: DisplayPreferences::default(),
             colors: crate::theme::ThemeColors::default(),
         }
