@@ -349,11 +349,10 @@ fn eq_range_spinbox_stays_in_the_graph_panels_top_right() {
 }
 
 #[test]
-fn now_playing_shows_output_bit_depth_in_both_layouts() {
+fn now_playing_shows_the_song_and_optional_artist_in_both_layouts() {
     let ui = window();
     ui.set_playback_details(crate::PlaybackDetails {
         title: "An Example Song".into(), artist: "An Example Artist".into(),
-        sample_rate: "44.1 kHz".into(), bit_depth: "24-bit".into(),
     });
     ui.show().unwrap();
 
@@ -367,74 +366,15 @@ fn now_playing_shows_output_bit_depth_in_both_layouts() {
                 });
                 i_slint_backend_testing::mock_elapsed_time(std::time::Duration::from_millis(250));
             }
-            for label in ["An Example Song · An Example Artist", "Output sample rate 44.1 kHz", "Output bit depth 24-bit"] {
-                let value = ElementHandle::find_by_accessible_label(&ui, label).next()
-                    .unwrap_or_else(|| panic!("missing {label} at width {width}, simple={simple}"));
-                assert!(value.absolute_position().x + value.size().width <= width);
-            }
+            let value = ElementHandle::find_by_accessible_label(&ui, "An Example Song · An Example Artist").next()
+                .unwrap_or_else(|| panic!("missing song and artist at width {width}, simple={simple}"));
+            assert!(value.absolute_position().x + value.size().width <= width);
         }
     }
     ui.set_playback_details(crate::PlaybackDetails {
-        bit_depth: "32-bit float".into(), ..ui.get_playback_details()
+        artist: "".into(), ..ui.get_playback_details()
     });
-    assert!(ElementHandle::find_by_accessible_label(&ui, "Output bit depth 32-bit float").next().is_some());
-}
-
-#[test]
-fn test_tone_panel_is_between_the_plots_and_keeps_its_settings_when_hidden() {
-    let ui = window();
-    ui.set_has_test_tone(true);
-    ui.set_connected(true);
-    ui.set_active_output_label("Speakers".into());
-    let playback = Rc::new(RefCell::new(Vec::new()));
-    let captured = playback.clone();
-    let weak = ui.as_weak();
-    ui.on_play_test_tone(move |playing| {
-        captured.borrow_mut().push(playing);
-        weak.upgrade().unwrap().set_test_tone_playing(playing);
-    });
-    ui.show().unwrap();
-
-    let live = ElementHandle::find_by_element_id(&ui, "MainWindow::live-view").next().unwrap();
-    let tone = ElementHandle::find_by_element_id(&ui, "MainWindow::test-tone-panel").next().unwrap();
-    let graph = ElementHandle::find_by_element_id(&ui, "MainWindow::eq-graph-panel").next().unwrap();
-    assert!(live.absolute_position().y + live.size().height < tone.absolute_position().y);
-    assert!(tone.absolute_position().y + tone.size().height < graph.absolute_position().y);
-    let height = tone.size().height;
-    let graph_top = graph.absolute_position().y;
-    element(&ui, "Test Tone height", AccessibleRole::Slider).invoke_accessible_increment_action();
-    assert_eq!(tone.size().height, height + 10.0);
-    assert_eq!(graph.absolute_position().y, graph_top + 10.0);
-
-    ui.window().set_size(LogicalSize::new(480.0, 360.0));
-    let pitch = element(&ui, "Test tone frequency in hertz", AccessibleRole::Spinbox);
-    let level = element(&ui, "Test tone level in dBFS", AccessibleRole::Spinbox);
-    let duration = element(&ui, "Test tone duration in seconds", AccessibleRole::Spinbox);
-    pitch.set_accessible_value("125");
-    level.set_accessible_value("-42");
-    duration.set_accessible_value("12");
-    assert_eq!(ui.get_test_tone_frequency(), 125);
-    assert_eq!(ui.get_test_tone_level(), -42);
-    assert_eq!(ui.get_test_tone_duration(), 12);
-    assert!(duration.absolute_position().x + duration.size().width <= 480.0);
-    let play = element(&ui, "Play test tone", AccessibleRole::Button);
-    assert!(play.absolute_position().x + play.size().width <= 480.0);
-    play.invoke_accessible_default_action();
-    assert!(ui.get_test_tone_playing());
-    assert_eq!(duration.accessible_enabled(), Some(false));
-    key(&ui, Key::Escape);
-    assert!(!ui.get_test_tone_playing());
-    play.invoke_accessible_default_action();
-    open_settings(&ui);
-    let toggle = element(&ui, "Test Tone", AccessibleRole::Checkbox);
-    toggle.invoke_accessible_default_action();
-    assert!(!ui.get_test_tone_playing());
-    assert!(!ui.get_show_test_tone());
-    assert_eq!(*playback.borrow(), [true, false, true, false]);
-    toggle.invoke_accessible_default_action();
-    assert!(ui.get_show_test_tone());
-    assert_eq!(ui.get_test_tone_height(), height + 10.0);
-    assert_eq!(ui.get_test_tone_duration(), 12);
+    assert!(ElementHandle::find_by_accessible_label(&ui, "An Example Song").next().is_some());
 }
 
 #[test]

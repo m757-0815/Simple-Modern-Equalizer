@@ -62,7 +62,7 @@ Priority: optional
 Architecture: $arch
 Maintainer: $maintainer
 Installed-Size: $installed_size
-Depends: $shlib_deps, pipewire-audio, pipewire-bin, hicolor-icon-theme,
+Depends: $shlib_deps, pipewire-audio, hicolor-icon-theme,
  libegl1, libgl1, libwayland-client0, libwayland-cursor0, libwayland-egl1,
  libx11-6, libx11-xcb1, libxcursor1, libxi6, libxkbcommon0, libxkbcommon-x11-0, libxrandr2
 Homepage: $homepage

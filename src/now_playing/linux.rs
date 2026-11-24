@@ -1,4 +1,4 @@
-use super::{Snapshot, Track};
+use super::Track;
 use std::{collections::HashMap, time::Duration};
 use zbus::{blocking::{Connection, Proxy, connection::Builder}, zvariant::OwnedValue};
 
@@ -10,20 +10,19 @@ pub(super) struct Source {
 type Properties = HashMap<String, OwnedValue>;
 
 impl Source {
-    pub(super) fn snapshot(&mut self) -> Snapshot {
+    pub(super) fn track(&mut self) -> Option<Track> {
         if self.connection.is_none() {
             self.connection = Builder::session().and_then(|builder| {
                 builder.method_timeout(Duration::from_secs(1)).build()
             }).ok();
         }
-        let track = match self.connection.as_ref().map(current_track) {
+        match self.connection.as_ref().map(current_track) {
             Some(Ok(track)) => track,
             _ => {
                 self.connection = None;
                 None
             }
-        };
-        Snapshot { track, output: None }
+        }
     }
 }
 

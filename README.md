@@ -27,7 +27,7 @@ The Ubuntu and Debian jobs are available in **Build installers**. Local builds a
 
 ### Linux AppImage
 
-The x86-64 AppImage needs a running PipeWire session. Test tone playback also uses `pw-play` from the PipeWire utilities. Launch the app from the folder containing the AppImage.
+The x86-64 AppImage needs a running PipeWire session. Launch the app from the folder containing the AppImage.
 
 ```sh
 chmod +x Simple-Modern-Equalizer-x86_64.AppImage
@@ -54,8 +54,7 @@ Run `SimpleModernEqualizer-Setup-x64.msi` and open the app from Start. Uninstall
 - **Parametric EQ and spline editing.** In **Standard**, drag EQ handles, hold **Shift** for fine adjustment, and double-click to add a handle. Set the graph range in the upper right from **±1 dB** to **±24 dB**. At ±1 dB, moving through half the graph height adjusts gain by 1 dB. Right-click a band or interior spline point to remove it. **Use Spline** and **Use Parametric** fit the same reference curve. **Optimizing EQ curve…** appears while a fit runs. **Undo** keeps the last 15 EQ actions.
 - **Headphone presets and Equalizer APO import.** Use the included tunings for headphones such as the Beyerdynamic DT 770 PRO, or save your own. **Select Preset** links presets to an audio output and imports Equalizer APO `.txt` files. Loading or importing asks before replacing unsaved EQ changes. [Headphone preset catalog](presets/catalog.json)
 - **Live audio monitoring.** **Live Monitor** offers six views, including Before / After EQ on PipeWire. Use **Settings** to choose an output or enable **Start on login** on Linux. [Audio output settings screenshot](docs/screenshots/settings.png)
-- **Test tone.** The **Test Tone** panel sits below Live Monitor. Set the frequency, level, and duration, then press **Play** to hear a sine wave while adjusting the EQ. Press **Stop** or **Escape** to end playback early. Drag the panel’s bottom grip to resize it, or hide it under **Settings → View**.
-- **Now Playing.** Shows the song and artist from the system media session, alongside the sample rate and bit depth. Windows shows the selected device format. Linux shows the PipeWire EQ output format.
+- **Now Playing.** Shows the current song and artist from the system media session.
 
 ## Build from source
 

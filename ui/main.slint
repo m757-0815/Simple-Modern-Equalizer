@@ -220,8 +220,6 @@ export struct PlotExtent {
 export struct PlaybackDetails {
     title: string,
     artist: string,
-    sample-rate: string,
-    bit-depth: string,
 }
 
 component PlotArea inherits Rectangle {
@@ -244,39 +242,19 @@ component GraphLabel inherits Label {
 
 component NowPlayingPanel inherits Panel {
     in property <PlaybackDetails> details;
-    HorizontalLayout {
+    VerticalLayout {
         padding-left: Graphite.panel-inset;
         padding-right: Graphite.panel-inset;
-        spacing: 12px;
-        cross-axis-alignment: center;
-        VerticalLayout {
-            horizontal-stretch: 1;
+        spacing: 3px;
+        alignment: center;
+        GraphLabel { text: "NOW PLAYING"; color: Appearance.accent; }
+        Label {
+            text: root.details.artist == "" ? root.details.title : root.details.title + " · " + root.details.artist;
+            accessible-label: self.text;
+            color: Graphite.text;
+            font-size: 14px;
             min-width: 0px;
-            spacing: 3px;
-            GraphLabel { text: "NOW PLAYING"; color: Appearance.accent; }
-            Label {
-                text: root.details.artist == "" ? root.details.title : root.details.title + " · " + root.details.artist;
-                accessible-label: self.text;
-                color: Graphite.text;
-                font-size: 14px;
-                min-width: 0px;
-                overflow: elide;
-            }
-        }
-        Rectangle { width: 1px; height: 34px; background: Graphite.border; }
-        VerticalLayout {
-            spacing: 3px;
-            GraphLabel { text: "OUTPUT SAMPLE RATE"; }
-            Label { text: root.details.sample-rate; color: Graphite.text; accessible-label: "Output sample rate " + self.text; }
-        }
-        VerticalLayout {
-            spacing: 3px;
-            GraphLabel { text: "OUTPUT BIT DEPTH"; }
-            Label {
-                text: root.details.bit-depth;
-                color: Graphite.text;
-                accessible-label: "Output bit depth " + self.text;
-            }
+            overflow: elide;
         }
     }
 }
@@ -614,19 +592,8 @@ export component MainWindow inherits Window {
     in-out property <bool> show-live-view: true;
     in property <bool> has-now-playing: true;
     in property <PlaybackDetails> playback-details: {
-        title: "No track reported", artist: "", sample-rate: "—", bit-depth: "—"
+        title: "No track reported", artist: ""
     };
-    in property <bool> has-test-tone;
-    in-out property <bool> show-test-tone: true;
-    in property <bool> test-tone-playing;
-    in property <string> test-tone-error;
-    in-out property <int> test-tone-frequency: 1000;
-    in-out property <int> test-tone-duration: 30;
-    in-out property <int> test-tone-level: -36;
-    in-out property <float> test-tone-height: 132;
-    callback play-test-tone(bool);
-    callback change-test-tone-frequency(int);
-    callback change-test-tone-level(int);
     in-out property <bool> show-band-list: true;
     in property <bool> spline-eq;
     in-out property <bool> show-levels: true;
@@ -759,10 +726,6 @@ export component MainWindow inherits Window {
         width: parent.width;
         height: parent.height;
         capture-key-pressed(event) => {
-            if (root.test-tone-playing && event.text == Key.Escape) {
-                root.play-test-tone(false);
-                return accept;
-            }
             if (root.fullscreen-enabled && event.text == Key.Escape) {
                 root.set-fullscreen-mode(false);
                 return accept;
@@ -925,83 +888,6 @@ export component MainWindow inherits Window {
                 ResizeGrip {
                     panel-height <=> root.live-view-height; minimum: 146; maximum: 420;
                     label: "Live Monitor height"; resized => { root.save-graph-view(); }
-                }
-            }
-        }
-        if root.has-test-tone && root.show-test-tone: test-tone-panel := Panel {
-            height: max(root.test-tone-height * 1px, test-tone-content.min-height);
-            test-tone-content := VerticalLayout {
-                padding-left: Graphite.panel-inset;
-                padding-right: Graphite.panel-inset;
-                padding-top: 10px;
-                spacing: 7px;
-                HorizontalLayout {
-                    height: 32px;
-                    cross-axis-alignment: center;
-                    PanelHeading { text: "Test Tone"; }
-                    Rectangle { horizontal-stretch: 1; }
-                    Button {
-                        text: root.test-tone-playing ? "Stop" : "Play";
-                        accessible-label: root.test-tone-playing ? "Stop test tone" : "Play test tone";
-                        width: 72px; height: 32px;
-                        primary: root.test-tone-playing;
-                        enabled: root.test-tone-playing || (root.connected && root.active-output-label != "");
-                        Tooltip { text: @markdown("Play a sine wave through the current EQ. Press Escape to stop."); }
-                        clicked => { root.play-test-tone(!root.test-tone-playing); }
-                    }
-                }
-                HorizontalLayout {
-                    spacing: 12px;
-                    VerticalLayout {
-                        spacing: 4px;
-                        GraphLabel { text: "Frequency (Hz)"; }
-                        SpinBox {
-                            width: 96px;
-                            accessible-label: "Test tone frequency in hertz";
-                            minimum: 20; maximum: 20000; step-size: 10;
-                            value <=> root.test-tone-frequency;
-                            edited(value) => {
-                                root.change-test-tone-frequency(value);
-                                root.save-graph-view();
-                            }
-                        }
-                    }
-                    VerticalLayout {
-                        spacing: 4px;
-                        GraphLabel { text: "Level (dBFS)"; }
-                        SpinBox {
-                            width: 96px;
-                            accessible-label: "Test tone level in dBFS";
-                            minimum: -60; maximum: -24;
-                            value <=> root.test-tone-level;
-                            Tooltip { text: @markdown("Set the tone level before equalization."); }
-                            edited(value) => {
-                                root.change-test-tone-level(value);
-                                root.save-graph-view();
-                            }
-                        }
-                    }
-                    VerticalLayout {
-                        spacing: 4px;
-                        GraphLabel { text: "Duration (s)"; }
-                        SpinBox {
-                            width: 96px;
-                            accessible-label: "Test tone duration in seconds";
-                            minimum: 1; maximum: 60;
-                            enabled: !root.test-tone-playing;
-                            value <=> root.test-tone-duration;
-                            edited(value) => { root.save-graph-view(); }
-                        }
-                    }
-                    Rectangle { horizontal-stretch: 1; }
-                }
-                if root.test-tone-error != "": Label {
-                    text: root.test-tone-error; color: Appearance.accent; wrap: word-wrap;
-                }
-                Rectangle { vertical-stretch: 1; }
-                ResizeGrip {
-                    panel-height <=> root.test-tone-height; minimum: 124; maximum: 260;
-                    label: "Test Tone height"; resized => { root.save-graph-view(); }
                 }
             }
         }
@@ -1662,13 +1548,6 @@ export component MainWindow inherits Window {
                                 text: "Live Monitor"; checked <=> root.show-live-view;
                                 Tooltip { text: @markdown("Live visualizations can increase CPU use. Turn off Live Monitor to reduce it."); }
                                 toggled => { root.change-live-view(self.checked); }
-                            }
-                            if root.has-test-tone: CheckBox {
-                                text: "Test Tone"; checked <=> root.show-test-tone;
-                                toggled => {
-                                    if (!self.checked) { root.play-test-tone(false); }
-                                    root.save-graph-view();
-                                }
                             }
                             CheckBox { text: "Band list"; checked <=> root.show-band-list; }
                             CheckBox { text: "Preamp and balance"; checked <=> root.show-levels; }

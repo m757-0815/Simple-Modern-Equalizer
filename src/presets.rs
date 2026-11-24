@@ -93,29 +93,8 @@ pub struct Preferences {
     pub live_view_height: Option<i32>,
     pub eq_plot_height: i32,
     pub eq_range_db: i32,
-    pub test_tone: TestTonePreferences,
     pub display: DisplayPreferences,
     pub colors: crate::theme::ThemeColors,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(default)]
-pub struct TestTonePreferences {
-    pub visible: bool,
-    pub height: i32,
-    pub settings: crate::test_tone::Settings,
-}
-
-impl Default for TestTonePreferences {
-    fn default() -> Self {
-        Self { visible: true, height: 132, settings: crate::test_tone::Settings::default() }
-    }
-}
-
-impl TestTonePreferences {
-    pub fn normalized(self) -> Self {
-        Self { height: self.height.clamp(124, 260), settings: self.settings.normalized(), ..self }
-    }
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -155,7 +134,6 @@ impl Default for Preferences {
             live_view_height: None,
             eq_plot_height: DEFAULT_EQ_PLOT_HEIGHT,
             eq_range_db: 24,
-            test_tone: TestTonePreferences::default(),
             display: DisplayPreferences::default(),
             colors: crate::theme::ThemeColors::default(),
         }
@@ -185,6 +163,17 @@ impl Preferences {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preferences_with_saved_test_tone_settings_still_load() {
+        let preferences: Preferences = serde_json::from_str(r#"{
+            "eq_range_db": 6,
+            "live_view_height": 280,
+            "test_tone": {"visible": false, "height": 160, "settings": {"frequency": 220}}
+        }"#).unwrap();
+        assert_eq!(preferences.eq_range_db(), 6);
+        assert_eq!(preferences.live_view_height(), 280.0);
+    }
 
     #[test]
     fn saved_live_display_ids_survive_removed_displays() {
