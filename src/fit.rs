@@ -1,4 +1,5 @@
 use crate::config::{Band, Config, MAX_BANDS, MAX_FREQUENCY, MIN_FREQUENCY};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 const SAMPLES: usize = 1025;
@@ -17,6 +18,46 @@ impl Target {
     }
 }
 
+#[derive(Default)]
+pub struct Cache {
+    modes: [Option<FittedCurve>; 2],
+}
+
+struct FittedCurve {
+    target: Target,
+    bands: Vec<Band>,
+    error: f64,
+}
+
+impl Cache {
+    pub fn reuse(&self, source: &Config, rate: u32) -> Option<(Config, f64)> {
+        let target = source.fit_target.as_ref()?;
+        let fitted = self.modes[usize::from(!source.spline)].as_ref()?;
+        if target.rate != rate.max(41) || fitted.target != *target {
+            return None;
+        }
+        let mut config = source.clone();
+        set_fitted_mode(&mut config, fitted.bands.clone());
+        Some((config, fitted.error))
+    }
+
+    pub fn remember(&mut self, fitted: &Config, error: f64) {
+        let Some(target) = &fitted.fit_target else { return; };
+        self.modes[usize::from(fitted.spline)] = Some(FittedCurve {
+            target: target.clone(),
+            bands: fitted.bands.clone(),
+            error,
+        });
+    }
+}
+
+fn set_fitted_mode(config: &mut Config, bands: Vec<Band>) {
+    config.spline = !config.spline;
+    config.bands = bands;
+    config.spline_source = None;
+    config.other_mode_bands = None;
+}
+
 pub fn convert(mut config: Config, rate: u32) -> (Config, f64) {
     let frequencies: Vec<_> = (0..SAMPLES).map(|index| {
         MIN_FREQUENCY * 1000.0_f64.powf(index as f64 / (SAMPLES - 1) as f64)
@@ -32,14 +73,12 @@ pub fn convert(mut config: Config, rate: u32) -> (Config, f64) {
             .map(|gain| (gain.clamp(-24.0, 24.0) * 1000.0).round() as i32).collect(),
     });
     let db: Vec<_> = target.millidb.iter().map(|gain| f64::from(*gain) / 1000.0).collect();
-    config.spline = !config.spline;
-    config.bands = if config.spline {
-        fit_spline(&frequencies, &db)
-    } else {
+    let bands = if config.spline {
         fit_parametric(&audible, &db, f64::from(rate))
+    } else {
+        fit_spline(&frequencies, &db)
     };
-    config.spline_source = None;
-    config.other_mode_bands = None;
+    set_fitted_mode(&mut config, bands);
     config.fit_target = Some(target);
     config.sort_bands();
     let actual = config.response(if config.spline { frequencies } else { audible }, f64::from(rate));
@@ -63,6 +102,28 @@ mod tests {
         let (parametric, error) = convert(spline, 48000);
         assert!(parametric.bands.is_empty());
         assert_eq!(error, 0.0);
+    }
+
+    #[test]
+    fn cached_modes_require_the_same_reference_and_sample_rate() {
+        let mut cache = Cache::default();
+        let (spline, spline_error) = convert(Config::default(), 48_000);
+        cache.remember(&spline, spline_error);
+        let (mut parametric, error) = convert(spline.clone(), 48_000);
+        cache.remember(&parametric, error);
+        assert_eq!(cache.reuse(&spline, 48_000), Some((parametric.clone(), error)));
+
+        parametric.preamp_db = -3.0;
+        let (reused, error) = cache.reuse(&parametric, 48_000).unwrap();
+        assert_eq!(reused.bands, spline.bands);
+        assert_eq!(reused.preamp_db, -3.0);
+        assert_eq!(error, spline_error);
+        assert!(cache.reuse(&parametric, 44_100).is_none());
+
+        parametric.fit_target.as_mut().unwrap().millidb[0] = 100;
+        assert!(cache.reuse(&parametric, 48_000).is_none());
+        parametric.fit_target = None;
+        assert!(cache.reuse(&parametric, 48_000).is_none());
     }
 
     #[test]
@@ -282,7 +343,10 @@ impl ParametricFit<'_> {
         }
         let mut ranked = seeds.into_iter().map(|band| (cost(&self.response(&band), residual), band)).collect::<Vec<_>>();
         ranked.sort_by(|left, right| left.0.total_cmp(&right.0));
-        ranked.into_iter().take(6).map(|(_, band)| self.refine(band, residual, 22))
+        ranked.truncate(6);
+        // Collect in seed order so equal costs select the same filter.
+        ranked.into_par_iter().map(|(_, band)| self.refine(band, residual, 22))
+            .collect::<Vec<_>>().into_iter()
             .min_by(|a, b| cost(&a.1, residual).total_cmp(&cost(&b.1, residual))).unwrap()
     }
 
@@ -370,17 +434,14 @@ fn fit_parametric(frequencies: &[f64], db: &[f64], rate: f64) -> Vec<Band> {
     if best_error <= TOLERANCE_DB {
         // Refit after dropping each candidate so small redundant filters do not
         // survive just because the initial search added them in a different order.
-        let mut index = 0;
-        while index < best.len() {
+        // Each candidate is independent, and the first valid removal wins.
+        while let Some(reduced) = (0..best.len()).into_par_iter().find_map_first(|index| {
             let mut reduced = best.clone();
             reduced.remove(index);
             let response = fit.refine_cascade(&mut reduced, db, 6);
-            if max_error(&response, db) <= TOLERANCE_DB {
-                best = reduced;
-                index = 0;
-            } else {
-                index += 1;
-            }
+            (max_error(&response, db) <= TOLERANCE_DB).then_some(reduced)
+        }) {
+            best = reduced;
         }
     }
     best
