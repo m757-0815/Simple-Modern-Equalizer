@@ -1,10 +1,12 @@
-# Simple Modern Equalizer
+# Simple Modern Equalizer for Linux and Windows
 
-System-wide EQ for Linux and Windows with tone controls, editable curves, headphone presets, and live audio monitoring.
+Simple Modern Equalizer is a free, open-source system-wide audio equalizer for headphones and speakers. Adjust bass, midrange, and treble, edit parametric EQ bands or spline curves, and monitor your audio live. The app uses PipeWire on Linux and imports Equalizer APO presets.
 
-| Standard · Before / After EQ | Simple · Oscilloscope |
+[Download installers](#downloads) · [Equalizer features](#equalizer-features) · [Build from source](#build-from-source)
+
+| Parametric EQ with before / after monitoring | Tone controls with a live oscilloscope |
 | --- | --- |
-| [![Standard mode with three EQ bands and Before / After EQ](docs/screenshots/standard.png)](docs/screenshots/standard.png) | [![Simple mode with Bass, Mid, Treble, and Oscilloscope](docs/screenshots/simple.png)](docs/screenshots/simple.png) |
+| [![Parametric audio equalizer with three editable bands and a before / after spectrum](docs/screenshots/standard.png)](docs/screenshots/standard.png) | [![Bass, midrange, and treble controls with a live audio oscilloscope](docs/screenshots/simple.png)](docs/screenshots/simple.png) |
 
 ## Install
 
@@ -14,8 +16,8 @@ The v0.1.15 downloads are GitHub Actions ZIP artifacts. Sign in to GitHub to dow
 
 | Target | Package |
 | --- | --- |
-| Windows x86-64 MSI | [Download Windows build](https://github.com/m757-0815/Simple-Modern-Equalizer/actions/runs/45378075492/artifacts/14913157219) |
-| Linux x86-64 AppImage | [Download AppImage](https://github.com/m757-0815/Simple-Modern-Equalizer/actions/runs/45378075492/artifacts/14913266153) |
+| Windows x86-64 MSI | [Download Windows MSI](https://github.com/m757-0815/Simple-Modern-Equalizer/actions/runs/45378075492/artifacts/14913157219) |
+| Linux x86-64 AppImage | [Download Linux AppImage](https://github.com/m757-0815/Simple-Modern-Equalizer/actions/runs/45378075492/artifacts/14913266153) |
 | Fedora 44 x86-64 RPM | [Download Fedora RPM](https://github.com/m757-0815/Simple-Modern-Equalizer/actions/runs/45378075492/artifacts/14911689092) |
 | Ubuntu 24.04 x86-64 DEB | [Ubuntu build script](scripts/build-deb.sh) |
 | Debian 13 x86-64 DEB | [Debian build script](scripts/build-deb.sh) |
@@ -23,7 +25,9 @@ The v0.1.15 downloads are GitHub Actions ZIP artifacts. Sign in to GitHub to dow
 
 The Ubuntu and Debian jobs are available in **Build installers**. Local builds are in `dist/`.
 
-**Linux.** The x86-64 AppImage needs a running PipeWire session. Launch it from the folder containing the AppImage.
+### Linux AppImage
+
+The x86-64 AppImage needs a running PipeWire session. Launch it from the folder containing the AppImage.
 
 ```sh
 chmod +x Simple-Modern-Equalizer-x86_64.AppImage
@@ -32,20 +36,26 @@ chmod +x Simple-Modern-Equalizer-x86_64.AppImage
 
 AppImages built on Fedora 44 require glibc 2.43 or later.
 
-**Ubuntu 24.04 and Debian 13.** Build the x86-64 `.deb` for your distribution or get it from a completed **Build installers** run. Run `sudo apt install ./FILE.deb` with its filename, then launch **Simple Modern Equalizer** from the application menu.
+### Ubuntu 24.04 and Debian 13 packages
 
-**Fedora 44.** Run `sudo dnf install ./FILE.rpm` with the RPM filename, then launch `simple-modern-equalizer`.
+Build the x86-64 `.deb` for your distribution or get it from a completed **Build installers** run. Run `sudo apt install ./FILE.deb` with its filename, then launch **Simple Modern Equalizer** from the application menu.
 
-**Windows.** Run `SimpleModernEqualizer-Setup-x64.msi` and open the app from Start. Uninstall Resonance first. The development MSI registers an unsigned audio component, sets `DisableProtectedAudioDG`, and restarts Windows Audio.
+### Fedora 44 RPM
 
-## How to use it
+Run `sudo dnf install ./FILE.rpm` with the RPM filename, then launch `simple-modern-equalizer`.
 
-- **Simple** gives you Bass, Mid, Treble, and Loudness. Double-click a lever to reset it. Both modes share **Preamp & Balance**. Enabling **Auto Headroom** replaces the manual preamp gain with a calculated value.
-- **Standard** lets you drag EQ handles, hold **Shift** for fine adjustment, and double-click to add a handle. Set the graph range in the upper right from **±1 dB** to **±24 dB**. At ±1 dB, moving through half the graph height adjusts gain by 1 dB. Right-click a band or interior spline point to remove it. **Use Spline** and **Use Parametric** fit the same reference curve. **Optimizing EQ curve…** appears while a fit runs. **Undo** keeps the last 15 EQ actions.
-- **Select Preset** saves tuning, links presets to an audio output, and imports Equalizer APO `.txt` files. Loading or importing asks before replacing unsaved EQ changes.
-- **Live Monitor** offers six views, including Before / After EQ on PipeWire. Use **Settings** to choose an output or enable **Start on login** on Linux. [Settings screenshot](docs/screenshots/settings.png)
+### Windows x64 installer
 
-## Developer
+Run `SimpleModernEqualizer-Setup-x64.msi` and open the app from Start. Uninstall Resonance first. The development MSI registers an unsigned audio component, sets `DisableProtectedAudioDG`, and restarts Windows Audio.
+
+## Equalizer features
+
+- **Tone controls.** The **Simple** view gives you Bass, Mid, Treble, and Loudness. Double-click a lever to reset it. Both modes share **Preamp & Balance**. Enabling **Auto Headroom** replaces the manual preamp gain with a calculated value.
+- **Parametric EQ and spline editing.** In **Standard**, drag EQ handles, hold **Shift** for fine adjustment, and double-click to add a handle. Set the graph range in the upper right from **±1 dB** to **±24 dB**. At ±1 dB, moving through half the graph height adjusts gain by 1 dB. Right-click a band or interior spline point to remove it. **Use Spline** and **Use Parametric** fit the same reference curve. **Optimizing EQ curve…** appears while a fit runs. **Undo** keeps the last 15 EQ actions.
+- **Headphone presets and Equalizer APO import.** Use the included tunings for headphones such as the Beyerdynamic DT 770 PRO, or save your own. **Select Preset** links presets to an audio output and imports Equalizer APO `.txt` files. Loading or importing asks before replacing unsaved EQ changes. [Headphone preset catalog](presets/catalog.json)
+- **Live audio monitoring.** **Live Monitor** offers six views, including Before / After EQ on PipeWire. Use **Settings** to choose an output or enable **Start on login** on Linux. [Audio output settings screenshot](docs/screenshots/settings.png)
+
+## Build from source
 
 Use the pinned Rust toolchain and install the platform dependencies listed in the build workflow. The app uses a Slint UI and the vendored Resonance audio engine. [Toolchain](rust-toolchain.toml) · [Build workflow](.github/workflows/package.yml) · [UI](ui/main.slint) · [Engine](vendor/resonance)
 
@@ -64,6 +74,8 @@ sh scripts/build-linux.sh
 
 Windows builds need MSVC, a Windows SDK, and WiX 4 with its Util extension. Enable EQ and pause playback before running the Windows audio check. [Audio check script](scripts/test-windows-audio.ps1)
 
-To contribute a headphone preset, add your tuning with the model, impedance, and source, then run `cargo test --locked bundled_catalog`. [Preset catalog](presets/catalog.json)
+To contribute a headphone preset, add your tuning with the model, impedance, and source, then run `cargo test --locked bundled_catalog`.
+
+## License
 
 Source is GPL-3.0-or-later. Builds using Slint’s GPL option are distributed under GPLv3. [License](LICENSE) · [Third-party notices](THIRD_PARTY_NOTICES.md)
