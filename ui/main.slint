@@ -603,6 +603,7 @@ export component MainWindow inherits Window {
     in property <string> signal: "Waiting for audio";
     in property <string> scope-status: "Waiting for output capture";
     in property <image> graph;
+    in-out property <int> eq-range-db: 24;
     in property <string> eq-bottom-db: "-24";
     in property <string> eq-top-db: "+24";
     in property <float> eq-zero-position: 0.5;
@@ -623,7 +624,8 @@ export component MainWindow inherits Window {
     in-out property <float> simple-treble;
     in-out property <bool> simple-loudness;
     callback change-layout(bool);
-    callback change-graph-height();
+    callback change-eq-range();
+    callback save-graph-view();
     callback change-tone(float, float, float, bool);
     callback choose-preset(int);
     callback resolve-preset-load(bool);
@@ -857,7 +859,7 @@ export component MainWindow inherits Window {
                 }
                 ResizeGrip {
                     panel-height <=> root.live-view-height; minimum: 146; maximum: 420;
-                    label: "Live Monitor height"; resized => { root.change-graph-height(); }
+                    label: "Live Monitor height"; resized => { root.save-graph-view(); }
                 }
             }
         }
@@ -927,16 +929,38 @@ export component MainWindow inherits Window {
                         clicked => { root.toggle-eq-mode(); }
                     }
                     if root.graph-edited && !root.narrow: GraphLabel { text: "Edited"; }
-                    if root.fit-detail != "": GraphLabel {
+                    if root.fit-detail != "" && !root.narrow: GraphLabel {
                         text: root.fit-detail;
                         Tooltip { text: @markdown("Largest difference from the reference curve on the fitting grid."); }
                     }
                     Rectangle { horizontal-stretch: 1; }
+                    HorizontalLayout {
+                        spacing: 4px;
+                        cross-axis-alignment: center;
+                        GraphLabel { text: "±"; }
+                        SpinBox {
+                            width: 76px;
+                            minimum: 1;
+                            maximum: 24;
+                            value <=> root.eq-range-db;
+                            accessible-label: "EQ graph range in dB";
+                            Tooltip { text: @markdown("Set the gain range above and below the graph center. Smaller values make vertical adjustments finer."); }
+                            edited(value) => {
+                                root.change-eq-range();
+                                root.save-graph-view();
+                            }
+                        }
+                        GraphLabel { text: "dB"; }
+                    }
                 }
                 HorizontalLayout {
                     height: 17px;
                     spacing: 8px;
                     GraphLabel { text: root.spline-eq ? "Spline EQ" : "Parametric EQ"; color: Appearance.accent; }
+                    if root.fit-detail != "" && root.narrow: GraphLabel {
+                        text: root.fit-detail;
+                        Tooltip { text: @markdown("Largest difference from the reference curve on the fitting grid."); }
+                    }
                     Rectangle { horizontal-stretch: 1; }
                     if root.show-clipping && root.clipping && root.clip-regions.length > 0: GraphLabel {
                         text: "Strong Bands At Clip"; color: Appearance.accent;
@@ -1133,7 +1157,7 @@ export component MainWindow inherits Window {
                     // Leave enough scroll room to keep the panel's top fixed while it shrinks.
                     root.eq-resize-scroll-floor = window-scroll.visible-height - window-scroll.content-y;
                 }
-                resized => { root.change-graph-height(); }
+                resized => { root.save-graph-view(); }
             }
         }
         if root.show-levels: levels-panel := Panel {

@@ -1,11 +1,12 @@
 %global debug_package %{nil}
 Name:           simple-modern-equalizer
 Version:        %{app_version}
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        System-wide graphical audio equalizer
 License:        GPL-3.0-only AND OFL-1.1
 URL:            https://github.com/m757-0815/Simple-Modern-Equalizer
 BuildRequires:  desktop-file-utils
+Requires:       hicolor-icon-theme
 Requires:       pipewire
 
 %description
@@ -25,6 +26,7 @@ install -Dm644 %{staged_app}/THIRD_PARTY_NOTICES.md %{buildroot}%{_docdir}/%{nam
 
 %check
 desktop-file-validate %{buildroot}%{_datadir}/applications/%{name}.desktop
+test -s %{buildroot}%{_datadir}/icons/hicolor/256x256/apps/%{name}.png
 
 %files
 %{_bindir}/simple-modern-equalizer

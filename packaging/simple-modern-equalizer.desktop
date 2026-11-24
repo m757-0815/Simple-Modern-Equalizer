@@ -3,6 +3,7 @@ Name=Simple Modern Equalizer
 Comment=System-wide audio equalizer
 Exec=simple-modern-equalizer
 Icon=simple-modern-equalizer
+StartupWMClass=simple-modern-equalizer
 Terminal=false
 Type=Application
 Categories=AudioVideo;Audio;

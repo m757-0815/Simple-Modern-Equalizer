@@ -92,6 +92,7 @@ pub struct Preferences {
     pub live_size: i32,
     pub live_view_height: Option<i32>,
     pub eq_plot_height: i32,
+    pub eq_range_db: i32,
     pub display: DisplayPreferences,
     pub colors: crate::theme::ThemeColors,
 }
@@ -132,6 +133,7 @@ impl Default for Preferences {
             live_size: 1,
             live_view_height: None,
             eq_plot_height: DEFAULT_EQ_PLOT_HEIGHT,
+            eq_range_db: 24,
             display: DisplayPreferences::default(),
             colors: crate::theme::ThemeColors::default(),
         }
@@ -146,6 +148,10 @@ impl Preferences {
 
     pub fn eq_plot_height(&self) -> f32 {
         self.eq_plot_height.max(130) as f32
+    }
+
+    pub fn eq_range_db(&self) -> i32 {
+        self.eq_range_db.clamp(1, 24)
     }
 
     pub fn save(&self, directory: &Path) -> Result<(), String> {
@@ -213,9 +219,11 @@ mod tests {
         let mut preferences = Preferences::default();
         let legacy = serde_json::from_str::<Preferences>(r#"{"display":{"eq_graph":false}}"#).unwrap();
         assert_eq!(legacy.eq_plot_height(), 260.0);
+        assert_eq!(legacy.eq_range_db(), 24);
         assert_eq!(legacy.colors, crate::theme::ThemeColors::default());
         preferences.colors = crate::theme::ThemeColors::parse("#AABBCC").unwrap();
         preferences.eq_plot_height = 1600;
+        preferences.eq_range_db = 1;
         preferences.outputs.insert("DAC endpoint ID".into(), id.clone());
         preferences.save(&directory).unwrap();
         preset.rename("Late night".into()).unwrap();
@@ -225,6 +233,7 @@ mod tests {
         assert_eq!(loaded[0].config.name, "Late night");
         assert_eq!(loaded[0].id(), settings.outputs["DAC endpoint ID"]);
         assert_eq!(settings.eq_plot_height(), 1600.0);
+        assert_eq!(settings.eq_range_db(), 1);
         assert_eq!(settings.colors, preferences.colors);
         fs::remove_file(preset.path.unwrap()).unwrap();
         fs::remove_file(directory.join("preferences.json")).unwrap();

@@ -312,6 +312,35 @@ fn preamp_spinbox_steps_by_005_and_auto_headroom_locks_controls() {
 }
 
 #[test]
+fn eq_range_spinbox_stays_at_the_graphs_upper_right() {
+    let ui = window();
+    ui.window().set_size(LogicalSize::new(480.0, 360.0));
+    ui.set_show_live_view(false);
+    ui.set_spline_eq(true);
+    ui.set_fit_detail("Fit Error 0.15 dB".into());
+    let edits = Rc::new(Cell::new(0));
+    let recorded = edits.clone();
+    ui.on_change_eq_range(move || recorded.set(recorded.get() + 1));
+    ui.show().unwrap();
+
+    let range = element(&ui, "EQ graph range in dB", AccessibleRole::Spinbox);
+    let graph = ElementHandle::find_by_element_id(&ui, "MainWindow::plot").next().unwrap();
+    let switch = element(&ui, "Use Parametric From EQ Graph", AccessibleRole::Button);
+    assert!(range.absolute_position().x >= switch.absolute_position().x + switch.size().width);
+    assert!(range.absolute_position().y + range.size().height <= graph.absolute_position().y);
+    assert!(range.absolute_position().x + range.size().width <= 470.0);
+    assert_eq!(ui.get_eq_range_db(), 24);
+    range.set_accessible_value("1");
+    assert_eq!(ui.get_eq_range_db(), 1);
+    range.invoke_accessible_decrement_action();
+    assert_eq!(ui.get_eq_range_db(), 1);
+    range.set_accessible_value("24");
+    range.invoke_accessible_increment_action();
+    assert_eq!(ui.get_eq_range_db(), 24);
+    assert!(edits.get() >= 2);
+}
+
+#[test]
 fn graph_continues_dragging_the_renumbered_band() {
     let ui = window();
     ui.set_show_live_view(false);

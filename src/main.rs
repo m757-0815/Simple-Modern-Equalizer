@@ -179,13 +179,17 @@ impl App {
         Ok(())
     }
 
-    fn save_graph_heights(&mut self, eq: f32, live: f32) -> Result<(), String> {
+    fn save_graph_view(&mut self, eq: f32, live: f32, range: i32) -> Result<(), String> {
         let eq = eq.round().max(130.0) as i32;
         let live = live.round().clamp(146.0, 420.0) as i32;
-        if eq != self.preferences.eq_plot_height || live != self.preferences.live_view_height() as i32 {
+        let range = range.clamp(1, 24);
+        if eq != self.preferences.eq_plot_height || live != self.preferences.live_view_height() as i32
+            || range != self.preferences.eq_range_db
+        {
             let mut preferences = self.preferences.clone();
             preferences.eq_plot_height = eq;
             preferences.live_view_height = Some(live);
+            preferences.eq_range_db = range;
             preferences.save(&self.directory)?;
             self.preferences = preferences;
         }
@@ -319,12 +323,12 @@ fn text_model(values: impl IntoIterator<Item = String>) -> ModelRc<SharedString>
     Rc::new(VecModel::from(values.into_iter().map(Into::into).collect::<Vec<_>>())).into()
 }
 
-fn band_row(cfg: &Config, index: usize) -> BandRow {
+fn band_row(cfg: &Config, index: usize, decimals: usize) -> BandRow {
     let band = &cfg.bands[index];
     BandRow {
         frequency: format!("{:.1}", band.frequency_hz).into(),
         gain: band.gain_db as f32,
-        gain_label: format!("{:+.1} dB", band.gain_db).into(),
+        gain_label: format!("{:+.*} dB", decimals, band.gain_db).into(),
         q: format!("{:.2}", band.q).into(),
         kind: match band.kind.as_str() { "LS" => 1, "HS" => 2, _ => 0 },
         enabled: band.enabled,
@@ -343,6 +347,7 @@ fn draw_eq_graph(ui: &MainWindow, app: &mut App) {
     let rate = app.format.as_ref().map_or(48000.0, |format| format.sample_rate);
     let overlay = if ui.get_show_eq_spectrum() { &app.plot_spectrum[..] } else { &[] };
     app.plot.set_colors(app.preferences.colors);
+    app.plot.set_range(ui.get_eq_range_db());
     if let Some(frame) = app.plot.frame(&app.effective, overlay, rate, size) {
         ui.set_graph(slint::Image::from_rgba8(frame));
         let (bottom, top) = app.plot.output_bounds();
@@ -425,16 +430,17 @@ fn update_controls(ui: &MainWindow, app: &App) {
 }
 
 fn refresh_band_rows(ui: &MainWindow, cfg: &Config) {
+    let decimals = graph::GainAxis::new(ui.get_eq_range_db()).gain_decimals();
     let rows = ui.get_bands();
     if rows.row_count() == cfg.bands.len() {
         for index in 0..cfg.bands.len() {
-            let row = band_row(cfg, index);
+            let row = band_row(cfg, index, decimals);
             if rows.row_data(index).as_ref() != Some(&row) {
                 rows.set_row_data(index, row);
             }
         }
     } else {
-        ui.set_bands(Rc::new(VecModel::from((0..cfg.bands.len()).map(|index| band_row(cfg, index)).collect::<Vec<_>>())).into());
+        ui.set_bands(Rc::new(VecModel::from((0..cfg.bands.len()).map(|index| band_row(cfg, index, decimals)).collect::<Vec<_>>())).into());
     }
 }
 
@@ -776,6 +782,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ui = MainWindow::new()?;
     #[cfg(target_os = "linux")]
     {
+        slint::set_xdg_app_id("simple-modern-equalizer")?;
         ui.set_has_login_start(true);
         ui.set_login_start(autostart::enabled(&login_entry));
         ui.on_change_login_start(move |enabled| {
@@ -801,6 +808,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         FrequencyTick { position, label }
     }).collect::<Vec<_>>();
     ui.set_live_frequency_ticks(Rc::new(VecModel::from(frequency_ticks)).into());
+    ui.set_eq_range_db(app.borrow().preferences.eq_range_db());
     update_controls(&ui, &app.borrow());
     draw_eq_graph(&ui, &mut app.borrow_mut());
     {
@@ -874,18 +882,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let timer = slint::Timer::default();
         let weak = ui.as_weak();
         let app = app.clone();
-        ui.on_change_graph_height(move || {
+        ui.on_save_graph_view(move || {
             let weak = weak.clone();
             let app = app.clone();
             timer.start(slint::TimerMode::SingleShot, Duration::from_millis(250), move || {
                 if let Some(w) = weak.upgrade()
-                    && let Err(error) = app.borrow_mut().save_graph_heights(w.get_eq_plot_height(), w.get_live_view_height())
+                    && let Err(error) = app.borrow_mut().save_graph_view(
+                        w.get_eq_plot_height(), w.get_live_view_height(), w.get_eq_range_db())
                 {
                     w.set_notice(error.into());
                 }
             });
         });
     }
+    on_ui_action!(on_change_eq_range, |w, a, | {
+        a.drag_origin = None;
+        w.invoke_cancel_graph_drag();
+        let cfg = a.reference.as_ref().filter(|_| a.listening_to_a).unwrap_or(&a.cfg);
+        refresh_band_rows(&w, cfg);
+        draw_eq_graph(&w, &mut a);
+    });
     on_ui_action!(on_change_tone, |w, a, bass, mid, treble, loudness| {
         if (a.simple.bass, a.simple.mid, a.simple.treble, a.simple.loudness) == (bass, mid, treble, loudness) {
             return;
@@ -1023,7 +1039,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         {
             return;
         }
-        let (frequency, gain) = graph::band_values(x.into(), y.into());
+        let (frequency, gain) = a.plot.axis.band_values(x.into(), y.into());
         let mut config = a.cfg.clone();
         let index = config.bands.partition_point(|band| band.frequency_hz <= frequency);
         if config.add_peak(frequency, gain) {
@@ -1043,7 +1059,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             a.edit_group = None;
             let hit = graph::hit_band(&a.plot.dots, x.into(), y.into(), width.into(), height.into());
             a.drag_origin = hit.and_then(|index| a.cfg.bands.get(index).map(|band| {
-                graph::BandDrag::new(index, band).with_gain_span(a.plot.axis.span())
+                graph::BandDrag::new(index, band).with_axis(a.plot.axis)
             }));
             a.drag_origin.map_or(-1, |drag| drag.index as i32)
         });
@@ -1437,7 +1453,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         preset_button: ui.get_show_preset_button(),
         eq_spectrum: ui.get_show_eq_spectrum(),
     };
-    a.save_graph_heights(ui.get_eq_plot_height(), ui.get_live_view_height())?;
+    a.save_graph_view(ui.get_eq_plot_height(), ui.get_live_view_height(), ui.get_eq_range_db())?;
     a.preferences.save(&a.directory)?;
     Ok(())
 }

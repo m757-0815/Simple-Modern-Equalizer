@@ -10,18 +10,39 @@ const H: usize = 260;
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct GainAxis {
-    pub bottom: f64,
-    pub top: f64,
+    range: i32,
 }
 
 impl Default for GainAxis {
-    fn default() -> Self { Self { bottom: -MAX_GAIN_DB, top: MAX_GAIN_DB } }
+    fn default() -> Self { Self::new(MAX_GAIN_DB as i32) }
 }
 
 impl GainAxis {
-    pub fn span(self) -> f64 { self.top - self.bottom }
+    pub fn new(range: i32) -> Self {
+        Self { range: range.clamp(1, MAX_GAIN_DB as i32) }
+    }
 
-    pub fn y(self, gain: f64) -> f64 { ((self.top - gain) / self.span()).clamp(0.0, 1.0) }
+    fn span(self) -> f64 { 2.0 * f64::from(self.range) }
+
+    fn y(self, gain: f64) -> f64 { (f64::from(self.range) - gain) / self.span() }
+
+    pub fn gain_decimals(self) -> usize {
+        match self.range {
+            1..=2 => 3,
+            3..=12 => 2,
+            _ => 1,
+        }
+    }
+
+    pub fn band_values(self, x: f64, y: f64) -> (f64, f64) {
+        let gain = f64::from(self.range) * (1.0 - 2.0 * y.clamp(0.0, 1.0));
+        (frequency_at(x), self.round_gain(gain))
+    }
+
+    fn round_gain(self, gain: f64) -> f64 {
+        let scale = 10.0_f64.powi(self.gain_decimals() as i32);
+        (gain.clamp(-MAX_GAIN_DB, MAX_GAIN_DB) * scale).round() / scale
+    }
 }
 
 pub fn position(frequency_hz: f64, gain_db: f64) -> (f64, f64) {
@@ -31,10 +52,9 @@ pub fn position(frequency_hz: f64, gain_db: f64) -> (f64, f64) {
     )
 }
 
-pub fn band_values(x: f64, y: f64) -> (f64, f64) {
+fn frequency_at(x: f64) -> f64 {
     let frequency_hz = 20.0 * 1000.0_f64.powf(x.clamp(0.0, 1.0));
-    let gain_db = MAX_GAIN_DB * (1.0 - 2.0 * y.clamp(0.0, 1.0));
-    ((frequency_hz * 10.0).round() / 10.0, (gain_db * 10.0).round() / 10.0)
+    (frequency_hz * 10.0).round() / 10.0
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -50,23 +70,23 @@ pub struct BandDrag {
     frequency: f64,
     gain: f64,
     q: f64,
-    gain_span: f64,
+    axis: GainAxis,
 }
 
 impl BandDrag {
     pub fn new(index: usize, band: &Band) -> Self {
-        Self { index, frequency: band.frequency_hz, gain: band.gain_db, q: band.q, gain_span: 2.0 * MAX_GAIN_DB }
+        Self { index, frequency: band.frequency_hz, gain: band.gain_db, q: band.q, axis: GainAxis::default() }
     }
 
-    pub fn with_gain_span(mut self, span: f64) -> Self {
-        self.gain_span = span;
+    pub fn with_axis(mut self, axis: GainAxis) -> Self {
+        self.axis = axis;
         self
     }
 
     pub fn update(&mut self, cfg: &mut Config, dx: f64, dy: f64) -> bool {
         let Some(current) = cfg.bands.get(self.index) else { return false; };
         let mut moved = current.clone();
-        (moved.frequency_hz, moved.gain_db) = drag_values(self.frequency, self.gain, dx, dy, self.gain_span);
+        (moved.frequency_hz, moved.gain_db) = drag_values(self.frequency, self.gain, dx, dy, self.axis);
         if cfg.spline {
             if cfg.locked_point(self.index) || (moved.frequency_hz != current.frequency_hz
                 && !cfg.can_place_spline_point(moved.frequency_hz, Some(self.index)))
@@ -86,17 +106,10 @@ impl BandDrag {
     }
 }
 
-fn drag_values(frequency: f64, gain: f64, dx: f64, dy: f64, gain_span: f64) -> (f64, f64) {
-    let (x, _) = position(frequency, gain);
-    let (moved_frequency, _) = band_values(x + dx, 0.0);
-    let moved_gain = rounded_gain(gain - dy * gain_span);
-    let moved_frequency = if dx == 0.0 { frequency } else { moved_frequency };
-    let moved_gain = if dy == 0.0 { gain } else { moved_gain };
+fn drag_values(frequency: f64, gain: f64, dx: f64, dy: f64, axis: GainAxis) -> (f64, f64) {
+    let moved_frequency = if dx == 0.0 { frequency } else { frequency_at(position(frequency, gain).0 + dx) };
+    let moved_gain = if dy == 0.0 { gain } else { axis.round_gain(gain - dy * axis.span()) };
     (moved_frequency, moved_gain)
-}
-
-fn rounded_gain(gain: f64) -> f64 {
-    (gain.clamp(-MAX_GAIN_DB, MAX_GAIN_DB) * 10.0).round() / 10.0
 }
 
 pub fn hit_band(dots: &[Dot], x: f64, y: f64, width: f64, height: f64) -> Option<usize> {
@@ -119,7 +132,7 @@ pub struct GraphCache {
     output_offset: f64,
     sample_rate: f64,
     pub axis: GainAxis,
-    curve: Vec<f32>,
+    curve: Vec<f64>,
     rendered_spectrum: Vec<f32>,
     rendered_size: Option<RasterSize>,
     colors: ThemeColors,
@@ -127,6 +140,14 @@ pub struct GraphCache {
 }
 
 impl GraphCache {
+    pub fn set_range(&mut self, range: i32) {
+        let axis = GainAxis::new(range);
+        if self.axis != axis {
+            self.axis = axis;
+            self.rendered_size = None;
+        }
+    }
+
     pub fn set_colors(&mut self, colors: ThemeColors) {
         if self.colors.accent != colors.accent {
             self.colors = colors;
@@ -135,11 +156,12 @@ impl GraphCache {
     }
 
     pub fn output_bounds(&self) -> (f64, f64) {
-        (self.axis.bottom + self.output_offset, self.axis.top + self.output_offset)
+        let range = f64::from(self.axis.range);
+        (self.output_offset - range, self.output_offset + range)
     }
 
     pub fn zero_position(&self) -> f64 {
-        (self.axis.top + self.output_offset) / self.axis.span()
+        self.axis.y(-self.output_offset)
     }
 
     pub fn update_dots(&mut self, cfg: &Config) -> bool {
@@ -154,11 +176,12 @@ impl GraphCache {
                 let sample = (x * W as f64 - 0.5).clamp(0.0, (self.curve.len() - 1) as f64);
                 let left = sample.floor() as usize;
                 let right = sample.ceil() as usize;
-                let a = f64::from(self.curve[left]);
-                let b = f64::from(self.curve[right]);
-                (a + (b - a) * sample.fract() + 0.5) / H as f64
+                let a = self.curve[left];
+                let b = self.curve[right];
+                let y = self.axis.y(a + (b - a) * sample.fract());
+                (y * (H - 1) as f64 + 0.5) / H as f64
             } else {
-                (self.axis.top - band.gain_db) / self.axis.span()
+                self.axis.y(band.gain_db)
             };
             Dot { x, y, enabled: !cfg.bypass && band.enabled }
         }).collect();
@@ -181,7 +204,7 @@ impl GraphCache {
             self.output_offset != preamp || (!cfg.bypass && self.sample_rate != rate);
         if changed {
             self.output_offset = preamp;
-            let levels = if direct_points.is_some() {
+            self.curve = if direct_points.is_some() {
                 Vec::new()
             } else if cfg.bypass {
                 vec![0.0; W]
@@ -189,10 +212,6 @@ impl GraphCache {
                 let frequencies = (0..W).map(|x| (20.0 * 1000.0_f64.powf(x as f64 / (W - 1) as f64)).min(rate / 2.0));
                 cfg.response(frequencies, rate)
             };
-            self.curve = levels.into_iter().map(|db| {
-                let y = self.axis.y(db);
-                (y * (H - 1) as f64) as f32
-            }).collect();
             self.bands.clone_from(&cfg.bands);
             self.spline_source.clone_from(&cfg.spline_source);
             self.other_mode_bands.clone_from(&cfg.other_mode_bands);
@@ -210,7 +229,7 @@ impl GraphCache {
         let path = if let Some(points) = direct_points {
             band_spline(points, self.axis)
         } else {
-            response_path(&self.curve)
+            response_path(&self.curve, self.axis)
         };
         Some(render(path.as_ref(), self.axis, self.output_offset, cfg.bypass, visible, size, self.colors))
     }
@@ -220,7 +239,7 @@ fn band_spline(bands: &[Band], axis: GainAxis) -> Option<Path> {
     let mut points = bands.iter().map(|band| {
         let (x, _) = position(band.frequency_hz, band.gain_db);
         // Clip the finished curve at the viewport, preserving its shape near the edges.
-        let y = (axis.top - band.gain_db) / axis.span();
+        let y = axis.y(band.gain_db);
         ((x * W as f64) as f32, (y * H as f64) as f32)
     });
     let (mut x, mut y) = points.next()?;
@@ -236,11 +255,12 @@ fn band_spline(bands: &[Band], axis: GainAxis) -> Option<Path> {
     path.finish()
 }
 
-fn response_path(curve: &[f32]) -> Option<Path> {
+fn response_path(curve: &[f64], axis: GainAxis) -> Option<Path> {
+    let y = |db| (axis.y(db) * (H - 1) as f64) as f32 + 0.5;
     let mut path = PathBuilder::new();
-    path.move_to(0.5, *curve.first()? + 0.5);
-    for (x, &y) in curve.iter().enumerate().skip(1) {
-        path.line_to(x as f32 + 0.5, y + 0.5);
+    path.move_to(0.5, y(*curve.first()?));
+    for (x, &db) in curve.iter().enumerate().skip(1) {
+        path.line_to(x as f32 + 0.5, y(db));
     }
     path.finish()
 }
@@ -255,9 +275,10 @@ fn render(curve: Option<&Path>, axis: GainAxis, offset: f64, bypass: bool, spect
         let gutter = (end - start) * 0.15;
         canvas.rect(start + gutter, H as f32 - height, end - start - 2.0 * gutter, height, spectrum_fill);
     }
-    let step = if axis.span() > 60.0 { 12.0 } else { 6.0 };
-    let first = ((axis.bottom + offset) / step).ceil() as i32;
-    let last = ((axis.top + offset) / step).floor() as i32;
+    let range = f64::from(axis.range);
+    let step = match axis.range { 1..=2 => 0.5, 3..=5 => 1.0, 6..=12 => 3.0, _ => 6.0 };
+    let first = ((offset - range) / step).ceil() as i32;
+    let last = ((offset + range) / step).floor() as i32;
     for index in first..=last {
         let db = f64::from(index) * step;
         let y = (axis.y(db - offset) * (H - 1) as f64).round() as f32;
@@ -377,8 +398,10 @@ mod tests {
     #[test]
     fn response_stroke_blends_fractional_pixel_edges() {
         let colors = ThemeColors::default();
-        let path = response_path(&vec![119.75; W]).unwrap();
-        let image = render(Some(&path), GainAxis::default(), 0.0, false, &[], TEST_SIZE, colors);
+        let axis = GainAxis::default();
+        let gain = MAX_GAIN_DB - axis.span() * 119.75 / (H - 1) as f64;
+        let path = response_path(&vec![gain; W], axis).unwrap();
+        let image = render(Some(&path), axis, 0.0, false, &[], TEST_SIZE, colors);
         let pixel = |y: usize| {
             let offset = (y * W + 8) * 4;
             &image.as_bytes()[offset..offset + 3]
@@ -392,17 +415,42 @@ mod tests {
     #[test]
     fn drag_mapping_round_trips_and_clamps() {
         let (x, y) = position(1200.0, -9.5);
-        assert_eq!(band_values(x, y), (1200.0, -9.5));
-        assert_eq!(band_values(-0.2, 1.2), (20.0, -24.0));
-        assert_eq!(band_values(1.2, -0.2), (20000.0, 24.0));
+        let axis = GainAxis::default();
+        assert_eq!(axis.band_values(x, y), (1200.0, -9.5));
+        assert_eq!(axis.band_values(-0.2, 1.2), (20.0, -24.0));
+        assert_eq!(axis.band_values(1.2, -0.2), (20000.0, 24.0));
     }
 
     #[test]
     fn one_axis_drag_preserves_the_other_parameter_at_full_precision() {
         let (frequency, gain) = (1000.222, 3.873);
-        assert_eq!(drag_values(frequency, gain, 0.0, -0.04, 48.0).0, frequency);
-        assert_eq!(drag_values(frequency, gain, 0.12, 0.0, 48.0).1, gain);
-        assert_eq!(drag_values(frequency, gain, 0.0, 0.0, 48.0), (frequency, gain));
+        let axis = GainAxis::default();
+        assert_eq!(drag_values(frequency, gain, 0.0, -0.04, axis).0, frequency);
+        assert_eq!(drag_values(frequency, gain, 0.12, 0.0, axis).1, gain);
+        assert_eq!(drag_values(frequency, gain, 0.0, 0.0, axis), (frequency, gain));
+    }
+
+    #[test]
+    fn narrow_range_reprojects_the_curve_and_supports_fine_drags() {
+        let mut cfg = Config::default();
+        cfg.bands[0].gain_db = 0.5;
+        cfg.preamp_db = -3.0;
+        let mut cache = GraphCache::default();
+        cache.frame(&cfg, &[], 48000.0, TEST_SIZE).unwrap();
+        cache.update_dots(&cfg);
+        let curve = cache.curve.as_ptr();
+
+        cache.set_range(1);
+        cache.frame(&cfg, &[], 48000.0, TEST_SIZE).unwrap();
+        assert_eq!(cache.curve.as_ptr(), curve);
+        assert!(cache.update_dots(&cfg));
+        assert_eq!(cache.output_bounds(), (-4.0, -2.0));
+        assert_eq!(cache.dots[0].y, 0.25);
+        assert_eq!(cache.axis.band_values(0.5, 0.275).1, 0.45);
+
+        let mut drag = BandDrag::new(0, &cfg.bands[0]).with_axis(cache.axis);
+        assert!(drag.update(&mut cfg, 0.0, -0.0025));
+        assert_eq!(cfg.bands[0].gain_db, 0.505);
     }
 
     #[test]
@@ -507,7 +555,7 @@ mod tests {
             assert_eq!(cache.output_bounds(), (preamp - 24.0, preamp + 24.0));
             assert_eq!(cache.zero_position(), (24.0 + preamp) / 48.0);
             for (dot, band) in cache.dots.iter().zip(&cfg.bands) {
-                assert_eq!(band_values(dot.x, dot.y), (band.frequency_hz, band.gain_db));
+                assert_eq!(cache.axis.band_values(dot.x, dot.y), (band.frequency_hz, band.gain_db));
             }
         }
     }
