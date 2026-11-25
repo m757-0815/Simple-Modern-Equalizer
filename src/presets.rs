@@ -227,7 +227,14 @@ mod tests {
             "builtin:DT 770 PRO - 32 ohms",
             "builtin:DT 770 PRO - 80 ohms",
             "builtin:DT 770 PRO - 250 ohms",
+            "builtin:DT 990 PRO - 80 ohms",
             "builtin:DT 990 PRO - 250 ohms",
+            "builtin:DT 990 PRO Black Edition - 80 ohms",
+            "builtin:DT 990 PRO Black Edition - 250 ohms",
+            "builtin:DT 990 Edition - 32 ohms",
+            "builtin:DT 990 Edition - 250 ohms",
+            "builtin:DT 990 Edition - 600 ohms",
+            "builtin:DT 990 PRO X - 48 ohms",
         ]);
         assert_eq!(presets[0].config, Config::flat_spline());
 

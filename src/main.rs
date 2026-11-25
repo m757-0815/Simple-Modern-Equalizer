@@ -1717,6 +1717,7 @@ mod tests {
         let flat = Config::flat_spline();
         let mut app = app_for_preset_tests(flat.clone());
         app.presets = Preset::bundled().unwrap();
+        let preset_count = app.presets.len();
         let flat_id = app.presets[0].id();
         app.active_output = Some("DAC".into());
         app.fallback = Some((Config::default(), None, true));
@@ -1731,7 +1732,7 @@ mod tests {
         ).unwrap();
         assert!(saved.hidden_builtin_presets.contains(&flat_id));
         assert!(saved.outputs.is_empty());
-        assert_eq!(app.presets.len(), 4);
+        assert_eq!(app.presets.len(), preset_count - 1);
         fs::remove_dir_all(&app.directory).unwrap();
     }
 
