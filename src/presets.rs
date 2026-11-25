@@ -1,6 +1,6 @@
 use crate::{Config, read_config, storage};
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, fs, io, path::{Path, PathBuf}, time::{SystemTime, UNIX_EPOCH}};
+use std::{collections::{BTreeMap, BTreeSet}, fs, io, path::{Path, PathBuf}, time::{SystemTime, UNIX_EPOCH}};
 
 pub const DEFAULT_EQ_PLOT_HEIGHT: i32 = 260;
 
@@ -13,6 +13,18 @@ pub struct Preset {
 impl Preset {
     pub fn builtin(config: Config) -> Self {
         Self { config, path: None }
+    }
+
+    pub fn bundled() -> Result<Vec<Self>, String> {
+        let catalog: Vec<Config> = serde_json::from_str(include_str!("../presets/catalog.json"))
+            .map_err(|error| error.to_string())?;
+        let mut presets = vec![Self::builtin(Config::flat_spline())];
+        for mut config in catalog {
+            config.validate()?;
+            config.sort_bands();
+            presets.push(Self::builtin(config));
+        }
+        Ok(presets)
     }
 
     pub fn id(&self) -> String {
@@ -75,6 +87,15 @@ impl Preset {
         Ok(())
     }
 
+    pub fn delete_file(&self) -> Result<(), String> {
+        let path = self.path.as_ref().ok_or("This built-in preset has no preset file.")?;
+        match fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(format!("Could not delete the preset file ({error}).")),
+        }
+    }
+
     fn write(&self, config: &Config) -> Result<(), String> {
         config.validate()?;
         let path = self.path.as_ref().ok_or("Save a copy of this built-in preset to edit it.")?;
@@ -90,6 +111,7 @@ pub struct Preferences {
     pub simple_auto_headroom: bool,
     pub phase_mode: crate::phase::Mode,
     pub outputs: BTreeMap<String, String>,
+    pub hidden_builtin_presets: BTreeSet<String>,
     pub live_size: i32,
     pub live_view_height: Option<i32>,
     pub eq_plot_height: i32,
@@ -132,6 +154,7 @@ impl Default for Preferences {
             simple_auto_headroom: true,
             phase_mode: crate::phase::Mode::default(),
             outputs: BTreeMap::new(),
+            hidden_builtin_presets: BTreeSet::new(),
             live_size: 1,
             live_view_height: None,
             eq_plot_height: DEFAULT_EQ_PLOT_HEIGHT,
@@ -198,17 +221,15 @@ mod tests {
 
     #[test]
     fn bundled_catalog_is_valid_and_preserves_legacy_keys() {
-        let catalog: Vec<Config> = serde_json::from_str(include_str!("../presets/catalog.json")).unwrap();
-        let mut ids = std::collections::HashSet::from([String::from("builtin:Flat")]);
-        let mut names = std::collections::HashSet::from([String::from("flat")]);
-        let presets = catalog.into_iter().map(|mut config| {
-            config.sort_bands();
-            config.validate().unwrap();
-            let preset = Preset::builtin(config);
-            assert!(ids.insert(preset.id()));
-            assert!(names.insert(preset.config.name.to_lowercase()));
-            preset
-        }).collect::<Vec<_>>();
+        let presets = Preset::bundled().unwrap();
+        assert_eq!(presets.iter().map(Preset::id).collect::<Vec<_>>(), [
+            "builtin:Flat",
+            "builtin:DT 770 PRO - 32 ohms",
+            "builtin:DT 770 PRO - 80 ohms",
+            "builtin:DT 770 PRO - 250 ohms",
+            "builtin:DT 990 PRO - 250 ohms",
+        ]);
+        assert_eq!(presets[0].config, Config::flat_spline());
 
         let old_name = "DT 990 PRO - 250 ohms";
         let preset = presets.iter().find(|preset| preset.config.name == format!("Beyerdynamic {old_name}")).unwrap();

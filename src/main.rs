@@ -80,6 +80,7 @@ struct App {
     drag_origin: Option<graph::BandDrag>,
     pending_band_removal: Option<(Config, Config)>,
     pending_preset_load: Option<PresetLoad>,
+    pending_preset_deletion: Option<String>,
     plot_spectrum: Vec<f32>,
     format: Option<engine::AudioFormat>,
     undo: VecDeque<UndoState>,
@@ -293,6 +294,39 @@ impl App {
         Ok(())
     }
 
+    fn remove_preset(&mut self, id: &str) -> Result<Option<String>, String> {
+        let index = self.presets.iter().position(|preset| preset.id() == id)
+            .ok_or("This preset is no longer available.")?;
+        let custom = self.presets[index].is_custom();
+        let unlink_active = self.active_output.as_ref().and_then(|output| self.preferences.outputs.get(output))
+            .is_some_and(|linked| linked == id);
+        let mut preferences = self.preferences.clone();
+        preferences.outputs.retain(|_, linked| linked != id);
+        let links_changed = preferences.outputs != self.preferences.outputs;
+        if custom {
+            self.presets[index].delete_file()?;
+        } else {
+            preferences.hidden_builtin_presets.insert(id.to_owned());
+            preferences.save(&self.directory)?;
+        }
+
+        self.preferences = preferences;
+        self.presets.remove(index);
+        remap_preset_selection(index, &mut self.selected, &mut self.edited);
+        if unlink_active {
+            self.fallback = None;
+        } else if let Some((_, selected, edited)) = &mut self.fallback {
+            remap_preset_selection(index, selected, edited);
+        }
+        for previous in &mut self.undo {
+            remap_preset_selection(index, &mut previous.selected, &mut previous.edited);
+        }
+        self.pending_preset_load = None;
+        // The custom file is already gone. Keep the editor and list consistent
+        // even if persisting the now-inactive output links fails.
+        Ok(if custom && links_changed { self.preferences.save(&self.directory).err() } else { None })
+    }
+
     fn change_output(&mut self, id: Option<String>) {
         if self.active_output == id {
             return;
@@ -305,6 +339,7 @@ impl App {
         }
         self.active_output = id;
         self.pending_preset_load = None;
+        self.pending_preset_deletion = None;
         self.reference = None;
         self.listening_to_a = false;
         if let Some(index) = preset_index {
@@ -319,6 +354,17 @@ impl App {
             self.selected = selected;
             self.edited = edited;
         }
+    }
+}
+
+fn remap_preset_selection(removed: usize, selection: &mut Option<usize>, edited: &mut bool) {
+    match *selection {
+        Some(index) if index == removed => {
+            *selection = None;
+            *edited = true;
+        }
+        Some(index) if index > removed => *selection = Some(index - 1),
+        _ => {}
     }
 }
 
@@ -568,6 +614,31 @@ fn resolve_preset_load(ui: &MainWindow, app: &mut App, confirmed: bool) {
     }
 }
 
+fn request_preset_deletion(ui: &MainWindow, app: &mut App, index: usize) {
+    if let Some(preset) = app.presets.get(index) {
+        app.pending_preset_deletion = Some(preset.id());
+        ui.invoke_warn_preset_deletion(preset.config.name.as_str().into(), preset.is_custom());
+    }
+}
+
+fn resolve_preset_deletion(ui: &MainWindow, app: &mut App, confirmed: bool) -> Result<(), String> {
+    let Some(id) = app.pending_preset_deletion.take().filter(|_| confirmed) else { return Ok(()) };
+    match app.remove_preset(&id) {
+        Ok(link_error) => {
+            refresh_preset_names(ui, app);
+            update_controls(ui, app);
+            let message = link_error.map_or_else(|| "Preset removed.".to_owned(), |error|
+                format!("Preset removed. Could not save the output links ({error})."));
+            ui.set_notice(message.into());
+            Ok(())
+        }
+        Err(error) => {
+            app.pending_preset_deletion = Some(id);
+            Err(error)
+        }
+    }
+}
+
 fn commit(ui: &MainWindow, app: &mut App, candidate: Config) {
     commit_edit(ui, app, candidate, None);
 }
@@ -778,25 +849,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::env::set_var("RESONANCE_SOCKET", directory.join("engine.sock"));
         std::env::set_var("XDG_CONFIG_HOME", directory.join("engine-config"));
     }
-    let flat = Config::flat_spline();
-    let mut presets = vec![Preset::builtin(flat.clone())];
-    let examples: Vec<Config> = serde_json::from_str(include_str!("../presets/catalog.json"))?;
-    for mut cfg in examples {
-        cfg.validate().map_err(std::io::Error::other)?;
-        cfg.sort_bands();
-        presets.push(Preset::builtin(cfg));
-    }
+    let mut presets = Preset::bundled().map_err(std::io::Error::other)?;
+    let flat = presets[0].config.clone();
     let mut cfg = read_config(&directory.join("current.json")).unwrap_or_else(|_| flat.clone());
     if cfg.bands == Config::default().bands && cfg.name == flat.name && !cfg.spline {
         cfg.bands = flat.bands;
         cfg.spline = true;
     }
     Preset::restore_builtin_name(&presets, &mut cfg);
+    let preferences: Preferences = storage::read_text(&directory.join("preferences.json")).ok()
+        .and_then(|text| serde_json::from_str(text.trim_start_matches('\u{feff}')).ok()).unwrap_or_default();
+    presets.retain(|preset| !preferences.hidden_builtin_presets.contains(&preset.id()));
     presets.extend(Preset::load_custom(&directory.join("presets"))?);
     let selected = presets.iter().position(|preset| preset_matches_config(&preset.config, &cfg));
     let edited = selected.is_none();
-    let preferences: Preferences = storage::read_text(&directory.join("preferences.json")).ok()
-        .and_then(|text| serde_json::from_str(text.trim_start_matches('\u{feff}')).ok()).unwrap_or_default();
     let simple: simple::SimpleSettings = storage::read_text(&directory.join("simple.json")).ok()
         .and_then(|text| serde_json::from_str(text.trim_start_matches('\u{feff}')).ok()).unwrap_or_default();
     let initial = if simple.active { simple.config(cfg.bypass, preferences.simple_auto_headroom, cfg.balance) } else {
@@ -806,7 +872,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         selected, preferences, active_output: None, fallback: None, reference: None, listening_to_a: false,
         effective: initial,
         outputs: vec![], directory, edited, plot: graph::GraphCache::default(), drag_origin: None,
-        pending_band_removal: None, pending_preset_load: None, plot_spectrum: vec![], format: None,
+        pending_band_removal: None, pending_preset_load: None, pending_preset_deletion: None,
+        plot_spectrum: vec![], format: None,
         undo: VecDeque::new(), edit_group: None, pending_fit: None, fit_cache: fit::Cache::default() }));
     let ui = MainWindow::new()?;
     #[cfg(target_os = "linux")]
@@ -1129,6 +1196,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     on_ui_action!(on_resolve_preset_load, |w, a, confirmed| {
         resolve_preset_load(&w, &mut a, confirmed);
     });
+    on_ui_action!(on_request_preset_deletion, |w, a, index| {
+        request_preset_deletion(&w, &mut a, index as usize);
+    });
+    {
+        let weak = ui.as_weak();
+        let app = app.clone();
+        ui.on_resolve_preset_deletion(move |confirmed| {
+            let Some(w) = weak.upgrade() else { return "".into() };
+            resolve_preset_deletion(&w, &mut app.borrow_mut(), confirmed).err().unwrap_or_default().into()
+        });
+    }
     {
         let weak = ui.as_weak();
         let app = app.clone();
@@ -1537,6 +1615,7 @@ mod tests {
             drag_origin: None,
             pending_band_removal: None,
             pending_preset_load: None,
+            pending_preset_deletion: None,
             plot_spectrum: vec![],
             format: None,
             undo: VecDeque::new(),
@@ -1561,6 +1640,98 @@ mod tests {
             assert_eq!(saved.phase_mode, mode);
         }
         assert_eq!(app.cfg, Config::default());
+        fs::remove_dir_all(&app.directory).unwrap();
+    }
+
+    #[test]
+    fn deleting_a_preset_requires_confirmation_and_repairs_saved_selections() {
+        use i_slint_backend_testing::{AccessibleRole, ElementHandle};
+
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = MainWindow::new().unwrap();
+        ui.window().set_size(slint::LogicalSize::new(683.0, 384.0));
+        let mut app = app_for_preset_tests(Config::default());
+        app.save_preset("Desk").unwrap();
+        let desk = app.presets[1].id();
+        app.remember_current(None);
+        app.fallback = Some((app.cfg.clone(), app.selected, app.edited));
+        app.save_preset("Keep").unwrap();
+        let keep = app.presets[2].id();
+        app.remember_current(None);
+        let playing = app.cfg.clone();
+        app.preferences.outputs.insert("Desk DAC".into(), desk.clone());
+        app.preferences.outputs.insert("Other DAC".into(), keep.clone());
+        app.preferences.save(&app.directory).unwrap();
+        refresh_preset_names(&ui, &app);
+        update_controls(&ui, &app);
+        let app = Rc::new(RefCell::new(app));
+        let weak = ui.as_weak();
+        let state = app.clone();
+        ui.on_request_preset_deletion(move |index| {
+            request_preset_deletion(&weak.unwrap(), &mut state.borrow_mut(), index as usize);
+        });
+        let weak = ui.as_weak();
+        let state = app.clone();
+        ui.on_resolve_preset_deletion(move |confirmed| {
+            resolve_preset_deletion(&weak.unwrap(), &mut state.borrow_mut(), confirmed)
+                .err().unwrap_or_default().into()
+        });
+        ui.show().unwrap();
+        let button = |name: &str| ElementHandle::find_by_accessible_label(&ui, name)
+            .find(|element| element.accessible_role() == Some(AccessibleRole::Button)).unwrap();
+        let custom = || Preset::load_custom(&app.borrow().directory.join("presets")).unwrap();
+
+        button("Select Preset").invoke_accessible_default_action();
+        let name = button("Desk");
+        let delete = button("Delete Desk");
+        assert!(delete.absolute_position().x >= name.absolute_position().x + name.size().width);
+        delete.mock_single_click(slint::platform::PointerEventButton::Left);
+        assert_eq!(app.borrow().pending_preset_deletion.as_deref(), Some(desk.as_str()));
+        assert_eq!(custom().len(), 2);
+        button("Cancel").invoke_accessible_default_action();
+        assert!(app.borrow().pending_preset_deletion.is_none());
+        assert_eq!(custom().len(), 2);
+
+        button("Delete Desk").invoke_accessible_default_action();
+        button("Delete preset").invoke_accessible_default_action();
+        assert!(ElementHandle::find_by_accessible_label(&ui, "Delete Desk").next().is_none());
+        assert!(ElementHandle::find_by_accessible_label(&ui, "Keep (selected)").next().is_some());
+        assert_eq!(custom().into_iter().map(|preset| preset.id()).collect::<Vec<_>>(), [keep.clone()]);
+        let app = app.borrow();
+        assert_eq!(app.cfg, playing);
+        assert_eq!(app.selected, Some(1));
+        assert!(!app.edited);
+        assert!(matches!(&app.fallback, Some((_, None, true))));
+        assert_eq!((app.undo[0].selected, app.undo[0].edited), (None, true));
+        assert_eq!(app.undo[1].selected, Some(1));
+        let saved: Preferences = serde_json::from_str(
+            &storage::read_text(&app.directory.join("preferences.json")).unwrap(),
+        ).unwrap();
+        assert!(!saved.outputs.contains_key("Desk DAC"));
+        assert_eq!(saved.outputs["Other DAC"], keep);
+        fs::remove_dir_all(&app.directory).unwrap();
+    }
+
+    #[test]
+    fn deleting_flat_hides_it_for_later_sessions_and_preserves_the_active_eq() {
+        let flat = Config::flat_spline();
+        let mut app = app_for_preset_tests(flat.clone());
+        app.presets = Preset::bundled().unwrap();
+        let flat_id = app.presets[0].id();
+        app.active_output = Some("DAC".into());
+        app.fallback = Some((Config::default(), None, true));
+        app.preferences.outputs.insert("DAC".into(), flat_id.clone());
+        assert!(app.remove_preset(&flat_id).unwrap().is_none());
+        assert_eq!(app.cfg, flat);
+        assert_eq!(app.selected, None);
+        assert!(app.edited);
+        assert!(app.fallback.is_none());
+        let saved: Preferences = serde_json::from_str(
+            &storage::read_text(&app.directory.join("preferences.json")).unwrap(),
+        ).unwrap();
+        assert!(saved.hidden_builtin_presets.contains(&flat_id));
+        assert!(saved.outputs.is_empty());
+        assert_eq!(app.presets.len(), 4);
         fs::remove_dir_all(&app.directory).unwrap();
     }
 

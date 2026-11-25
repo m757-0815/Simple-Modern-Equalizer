@@ -674,10 +674,30 @@ export component MainWindow inherits Window {
     public function dismiss-presets() {
         preset-menu.close();
         preset-load-warning.close();
+        preset-deletion.close();
     }
     function finish-preset-load(confirmed: bool) {
         preset-load-warning.close();
         root.resolve-preset-load(confirmed);
+    }
+    callback request-preset-deletion(int);
+    callback resolve-preset-deletion(bool) -> string;
+    private property <string> preset-deletion-name;
+    private property <bool> preset-deletion-custom;
+    private property <string> preset-deletion-error;
+    public function warn-preset-deletion(name: string, custom: bool) {
+        root.preset-deletion-name = name;
+        root.preset-deletion-custom = custom;
+        root.preset-deletion-error = "";
+        preset-menu.close();
+        preset-deletion.show();
+    }
+    function finish-preset-deletion(confirmed: bool) {
+        root.preset-deletion-error = root.resolve-preset-deletion(confirmed);
+        if (root.preset-deletion-error == "") {
+            preset-deletion.close();
+            preset-menu.show();
+        }
     }
     callback name-preset(bool, string) -> string;
     callback overwrite-preset() -> string;
@@ -1778,6 +1798,66 @@ export component MainWindow inherits Window {
             }
         }
     }
+    preset-deletion := PopupWindow {
+        width: min(460px, root.width - 20px);
+        height: min(root.height - 20px, 210px + (root.preset-deletion-error == "" ? 0px : 48px));
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        close-policy: no-auto-close;
+        forward-focus: cancel-preset-deletion;
+        Panel {
+            FocusScope {
+                width: parent.width;
+                height: parent.height;
+                capture-key-pressed(event) => {
+                    if event.text == Key.Escape {
+                        root.finish-preset-deletion(false);
+                        return accept;
+                    }
+                    return reject;
+                }
+                VerticalLayout {
+                    padding: 20px;
+                    spacing: 8px;
+                    PanelHeading { text: "Delete preset?"; }
+                    Label {
+                        text: root.preset-deletion-name;
+                        color: Appearance.accent;
+                        accessible-label: self.text;
+                        wrap: word-wrap;
+                        overflow: elide;
+                        max-height: 52px;
+                    }
+                    Label {
+                        text: root.preset-deletion-custom
+                            ? "This deletes the saved preset and removes its output links."
+                            : "This hides the built-in preset on this device and removes its output links.";
+                        wrap: word-wrap;
+                    }
+                    if root.preset-deletion-error != "": Label {
+                        text: root.preset-deletion-error;
+                        color: Appearance.accent;
+                        wrap: word-wrap;
+                        overflow: elide;
+                        max-height: 40px;
+                    }
+                    Rectangle { vertical-stretch: 1; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Rectangle { horizontal-stretch: 1; }
+                        cancel-preset-deletion := Button {
+                            text: "Cancel";
+                            clicked => { root.finish-preset-deletion(false); }
+                        }
+                        Button {
+                            text: "Delete preset";
+                            clicked => { root.finish-preset-deletion(true); }
+                        }
+                    }
+                }
+            }
+        }
+    }
     band-removal := PopupWindow {
         width: 460px;
         height: 180px;
@@ -1973,13 +2053,29 @@ export component MainWindow inherits Window {
                     VerticalLayout {
                         padding: 5px;
                         spacing: 4px;
-                        for name[index] in root.presets: Button {
-                            text: name + (index == root.preset-index ? " (selected)" : "");
-                            Tooltip { text: @markdown("Load this preset."); }
+                        if root.presets.length == 0: Label { text: "No saved presets"; }
+                        for name[index] in root.presets: HorizontalLayout {
                             height: 35px;
-                            clicked => {
-                                root.choose-preset(index);
-                                preset-menu.close();
+                            spacing: 6px;
+                            Rectangle {
+                                clip: true;
+                                horizontal-stretch: 1;
+                                Button {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    min-width: 0px;
+                                    text: name + (index == root.preset-index ? " (selected)" : "");
+                                    Tooltip { text: @markdown("Load this preset."); }
+                                    clicked => {
+                                        root.choose-preset(index);
+                                        preset-menu.close();
+                                    }
+                                }
+                            }
+                            Button {
+                                text: "Delete";
+                                accessible-label: "Delete " + name;
+                                clicked => { root.request-preset-deletion(index); }
                             }
                         }
                     }
