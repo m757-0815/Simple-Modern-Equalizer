@@ -297,13 +297,14 @@ fn worker_loop(weak: Weak<Shared>, path: PathBuf) {
                         }
                     }
                     if need_rebuild {
-                        let (c, notes) = snap.build_full_chain(channels, sr, cached_ir.as_ref());
+                        let (mut c, notes) = snap.build_full_chain(channels, sr, cached_ir.as_ref());
                         for n in &notes {
                             log::line(n);
                         }
                         log_attached(&c, sr);
                         if let Ok(mut g) = shared.state.lock() {
                             if let Some(l) = g.as_mut() {
+                                c.convolution.reuse_history_from(&mut l.chain.convolution);
                                 l.chain = c;
                             }
                         }

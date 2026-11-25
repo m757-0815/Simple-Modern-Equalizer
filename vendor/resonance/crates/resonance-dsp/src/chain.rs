@@ -144,11 +144,19 @@ impl ProcessorChain {
 
         let channels = self.channels;
 
-        if self.preamp_db != 0.0 {
-            let gain = db_to_linear(self.preamp_db);
-            for s in buf.iter_mut() {
-                *s *= gain;
+        let preamp_gain = if self.preamp_db == 0.0 { 1.0 } else { db_to_linear(self.preamp_db) };
+        let apply_preamp = |buf: &mut [f64]| {
+            if preamp_gain != 1.0 {
+                for sample in buf {
+                    *sample *= preamp_gain;
+                }
             }
+        };
+        // A standalone FIR is linear. Keep its buffered input independent
+        // of gain so live headroom changes reach its output immediately.
+        let preamp_after_convolution = self.filters.is_empty() && self.convolution.enabled();
+        if !preamp_after_convolution {
+            apply_preamp(buf);
         }
 
         // Linear phase engages only with a loaded kernel (see `eq_fir` docs).
@@ -347,6 +355,9 @@ impl ProcessorChain {
             }
         }
         self.convolution.process(buf, channels);
+        if preamp_after_convolution {
+            apply_preamp(buf);
+        }
         self.fidelity.process(buf, channels);
         self.ambience.process(buf, channels);
         self.surround.process(buf, channels);
@@ -1004,6 +1015,26 @@ mod tests {
                 i * gain
             );
         }
+    }
+
+    #[test]
+    fn preamp_changes_reach_an_active_standalone_fir_without_rebuffering() {
+        use crate::convolution::{BLOCK, IrData};
+
+        let rate = 48_000.0;
+        let mut chain = ProcessorChain::builder().channels(1).sample_rate(rate).build();
+        let mut taps = vec![0.0; 4 * BLOCK + 1];
+        taps[4 * BLOCK] = 1.0;
+        chain.convolution.load_ir(std::sync::Arc::new(IrData {
+            name: "test-delay".into(), path: String::new(), sample_rate: rate,
+            channels: vec![taps],
+        })).unwrap();
+        chain.process(&mut vec![0.5; 6 * BLOCK]);
+        chain.preamp_db = -6.0;
+        let mut output = vec![0.5; BLOCK];
+        chain.process(&mut output);
+        let expected = 0.5 * db_to_linear(-6.0);
+        assert!(output.iter().all(|sample| (sample - expected).abs() < 1e-9));
     }
 
     #[test]

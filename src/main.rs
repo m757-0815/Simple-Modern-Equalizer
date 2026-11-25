@@ -9,6 +9,7 @@ mod listening;
 mod live;
 mod monitor;
 mod now_playing;
+mod phase;
 mod plot_canvas;
 mod presets;
 mod scope;
@@ -197,6 +198,17 @@ impl App {
         Ok(())
     }
 
+    fn set_phase_mode(&mut self, mode: phase::Mode) -> Result<(), String> {
+        if mode != self.preferences.phase_mode {
+            let mut preferences = self.preferences.clone();
+            preferences.phase_mode = mode;
+            preferences.save(&self.directory)?;
+            self.preferences = preferences;
+            self.apply_audio();
+        }
+        Ok(())
+    }
+
     fn apply_audio(&mut self) {
         // Keep the saved Standard bands intact while only Simple tone filters are active.
         let (rate, channels) = self.format.as_ref().map_or((48000.0, 2), |format| (format.sample_rate, format.channels));
@@ -208,7 +220,7 @@ impl App {
             if self.listening_to_a { a.unwrap_or(b) } else { b }
         };
         if let Some(format) = &self.format {
-            self.engine.submit(format, config.clone());
+            self.engine.submit(format, config.clone(), self.preferences.phase_mode);
         }
         self.effective = config;
     }
@@ -428,6 +440,13 @@ fn update_controls(ui: &MainWindow, app: &App) {
     ui.set_output_mapping(mapped.and_then(|id| app.presets.iter().find(|preset| preset.id() == *id))
         .map(|preset| preset.config.name.clone()).unwrap_or_default().into());
     ui.set_can_unassign(mapped.is_some() && output_ready);
+}
+
+fn update_phase_setting(ui: &MainWindow, mode: phase::Mode) {
+    ui.set_phase_mode_index(mode.index());
+    let delay = mode.delay_ms();
+    ui.set_phase_mode_detail(if delay == 0 { "".into() }
+        else { format!("Adds up to {delay} ms of EQ buffering.").into() });
 }
 
 fn refresh_band_rows(ui: &MainWindow, cfg: &Config) {
@@ -811,6 +830,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ui.set_live_frequency_ticks(Rc::new(VecModel::from(frequency_ticks)).into());
     ui.set_eq_range_db(app.borrow().preferences.eq_range_db());
     update_controls(&ui, &app.borrow());
+    update_phase_setting(&ui, app.borrow().preferences.phase_mode);
     draw_eq_graph(&ui, &mut app.borrow_mut());
     {
         let state = app.borrow();
@@ -1207,6 +1227,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         a.engine.shared.lock().unwrap().target = Some(target);
         w.set_status("Switching output…".into());
     });
+    on_ui_action!(on_change_phase_mode, |w, a, index| {
+        if let Some(&mode) = phase::Mode::OPTIONS.get(index as usize) {
+            let error = a.set_phase_mode(mode).err().unwrap_or_default();
+            w.set_phase_mode_error(error.into());
+        }
+        update_phase_setting(&w, a.preferences.phase_mode);
+    });
     on_ui_action!(on_import_apo, |w, a, | {
         if let Some(path) = rfd::FileDialog::new()
             .set_title("Import Equalizer APO")
@@ -1505,6 +1532,22 @@ mod tests {
             pending_fit: None,
             fit_cache: fit::Cache::default(),
         }
+    }
+
+    #[test]
+    fn phase_selection_persists_outside_the_preset() {
+        let mut app = app_for_preset_tests(Config::default());
+        let old: Preferences = serde_json::from_str("{\"auto_headroom\":true}").unwrap();
+        assert_eq!(old.phase_mode, phase::Mode::Minimum);
+        assert!(old.auto_headroom);
+
+        app.set_phase_mode(phase::Mode::Zero).unwrap();
+        let saved: Preferences = serde_json::from_str(
+            &storage::read_text(&app.directory.join("preferences.json")).unwrap(),
+        ).unwrap();
+        assert_eq!(saved.phase_mode, phase::Mode::Zero);
+        assert_eq!(app.cfg, Config::default());
+        fs::remove_dir_all(&app.directory).unwrap();
     }
 
     #[test]

@@ -22,6 +22,27 @@ fn open_settings(ui: &MainWindow) {
 }
 
 #[test]
+fn playback_settings_offer_all_eq_phase_modes() {
+    let ui = window();
+    let selected = Rc::new(Cell::new(0));
+    let captured = selected.clone();
+    ui.on_change_phase_mode(move |mode| captured.set(mode));
+    ui.show().unwrap();
+    open_settings(&ui);
+
+    let choice = element(&ui, "EQ phase mode", AccessibleRole::Combobox);
+    assert_eq!(choice.accessible_value().unwrap(), "Minimum Phase");
+    choice.invoke_accessible_expand_action();
+    for (index, name) in ["Linear Phase", "Zero Phase (Beta)"].into_iter().enumerate() {
+        key(&ui, Key::DownArrow);
+        assert_eq!(ui.get_phase_mode_index(), index as i32 + 1);
+        assert_eq!(choice.accessible_value().unwrap(), name);
+    }
+    key(&ui, Key::Return);
+    assert_eq!(selected.get(), 2);
+}
+
+#[test]
 fn widget_accent_follows_the_app_when_the_desktop_reports_a_different_color() {
     use slint::private_unstable_api::re_exports::{ChangeTracker, WindowInner};
 

@@ -4427,6 +4427,7 @@ dependencies = [
  "i-slint-backend-testing",
  "rayon",
  "regex",
+ "resonance-dsp",
  "resonance-ipc",
  "rfd",
  "rustfft",

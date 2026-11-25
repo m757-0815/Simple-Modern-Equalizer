@@ -585,6 +585,9 @@ export component MainWindow inherits Window {
     in property <bool> listening-to-a;
     in-out property <int> preset-index: 0;
     in-out property <int> output-index: 0;
+    in-out property <int> phase-mode-index: 0;
+    in property <string> phase-mode-detail;
+    in property <string> phase-mode-error;
     in-out property <int> band-count: 5;
     in-out property <float> preamp;
     in-out property <float> balance;
@@ -682,6 +685,7 @@ export component MainWindow inherits Window {
     callback listen-a(bool);
     callback clear-reference();
     callback choose-output(int);
+    callback change-phase-mode(int);
     callback change-count(int);
     callback delete-band(int);
     callback resolve-band-removal(bool);
@@ -1512,8 +1516,10 @@ export component MainWindow inherits Window {
     }
     settings := PopupWindow {
         width: 420px;
-        private property <length> form-height: 368px + (root.has-login-start ? 31px : 0px)
-            + (root.login-start-error == "" ? 0px : 36px);
+        private property <length> form-height: 408px + (root.has-login-start ? 31px : 0px)
+            + (root.login-start-error == "" ? 0px : 36px)
+            + (root.phase-mode-detail == "" ? 0px : 26px)
+            + (root.phase-mode-error == "" ? 0px : 36px);
         height: min(self.form-height, root.height - 20px);
         x: clamp(settings-button.absolute-position.x + settings-button.width - self.width, 10px, root.width - self.width - 10px);
         y: clamp(settings-button.absolute-position.y + settings-button.height + 8px, 10px, root.height - self.height - 10px);
@@ -1578,6 +1584,22 @@ export component MainWindow inherits Window {
                             enabled: root.connected;
                             selected => { root.choose-output(self.current-index); }
                         }
+                    }
+                    HorizontalLayout {
+                        spacing: 12px;
+                        Label { text: "EQ phase mode"; width: 100px; }
+                        Choice {
+                            accessible-name: "EQ phase mode";
+                            model: ["Minimum Phase", "Linear Phase", "Zero Phase (Beta)"];
+                            current-index <=> root.phase-mode-index;
+                            selected => { root.change-phase-mode(self.current-index); }
+                        }
+                    }
+                    if root.phase-mode-detail != "": Label {
+                        text: root.phase-mode-detail; color: Graphite.secondary; wrap: word-wrap;
+                    }
+                    if root.phase-mode-error != "": Label {
+                        text: root.phase-mode-error; color: Appearance.accent; wrap: word-wrap;
                     }
                     if root.has-login-start: CheckBox {
                         text: "Start on login";

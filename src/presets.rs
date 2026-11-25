@@ -88,6 +88,7 @@ impl Preset {
 pub struct Preferences {
     pub auto_headroom: bool,
     pub simple_auto_headroom: bool,
+    pub phase_mode: crate::phase::Mode,
     pub outputs: BTreeMap<String, String>,
     pub live_size: i32,
     pub live_view_height: Option<i32>,
@@ -129,6 +130,7 @@ impl Default for Preferences {
         Self {
             auto_headroom: false,
             simple_auto_headroom: true,
+            phase_mode: crate::phase::Mode::default(),
             outputs: BTreeMap::new(),
             live_size: 1,
             live_view_height: None,

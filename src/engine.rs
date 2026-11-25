@@ -1,4 +1,4 @@
-use crate::config::{Band, Config};
+use crate::{config::Config, phase};
 use resonance_ipc::{Command, DaemonState, EffectsState, Response, RoutingMatrix, transport::SyncClient};
 use std::{path::{Path, PathBuf}, process::{Child, Command as Process}, sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}}, thread, time::{Duration, Instant}};
 
@@ -21,7 +21,7 @@ impl From<&DaemonState> for AudioFormat {
 
 #[derive(Default)]
 pub struct Shared {
-    prepared: Option<(AudioFormat, Arc<Config>)>,
+    prepared: Option<(AudioFormat, Arc<PlaybackSettings>)>,
     pub target: Option<Option<String>>,
     pub state: Option<DaemonState>,
     pub status: String,
@@ -36,8 +36,13 @@ pub struct Shared {
     pub monitor_signal: Option<Arc<crate::monitor::Signal>>,
 }
 
+struct PlaybackSettings {
+    config: Config,
+    phase_mode: phase::Mode,
+}
+
 impl Shared {
-    fn prepared_for(&self, format: &AudioFormat) -> Option<Arc<Config>> {
+    fn prepared_for(&self, format: &AudioFormat) -> Option<Arc<PlaybackSettings>> {
         self.prepared.as_ref()
             .filter(|(prepared_format, _)| prepared_format == format)
             .map(|(_, cfg)| cfg.clone())
@@ -131,25 +136,41 @@ fn update_plan(previous: Option<&Config>, cfg: &Config, channels: usize, sample_
     Ok(commands)
 }
 
-fn active_spline(config: &Config) -> Option<std::borrow::Cow<'_, [Band]>> {
-    if config.bypass { return None; }
-    let points = config.spline_correction();
-    points.iter().any(|point| point.gain_db != 0.0).then_some(points)
-}
-
-fn update_spline(
-    client: &mut SyncClient,
-    path: &Path,
-    points: Option<&[Band]>,
-    sample_rate: u32,
-) -> Result<(), String> {
-    if let Some(points) = points {
-        crate::storage::write_text(path, &crate::spline::kernel_wav(points, sample_rate))
-            .map_err(|error| format!("Could not save spline filter: {error}"))?;
-        request(client, Command::SetConvolutionIr { path: path.to_string_lossy().into_owned() })
-    } else {
-        request(client, Command::ClearConvolutionIr)
+fn playback_plan(
+    previous: Option<&PlaybackSettings>,
+    desired: &PlaybackSettings,
+    format: &AudioFormat,
+    convolution: Option<Command>,
+) -> Result<Vec<Command>, String> {
+    let before = previous.map(|settings| settings.phase_mode.biquad_config(&settings.config));
+    let after = desired.phase_mode.biquad_config(&desired.config);
+    let mut commands = update_plan(before.as_deref(), &after, format.channels, format.sample_rate)?;
+    if let Some(convolution) = convolution {
+        let mut deferred = Vec::new();
+        // A full sync swaps the IIR bands. Keep the chain bypassed until its
+        // convolution is in place, and raise preamp only after the IR change.
+        commands.retain_mut(|command| {
+            match command {
+                Command::ApplyState { enabled, .. } if *enabled => {
+                    *enabled = false;
+                    deferred.push(Command::SetPower { enabled: true });
+                }
+                Command::SetPower { enabled: true } => {
+                    deferred.push(Command::SetPower { enabled: true });
+                    return false;
+                }
+                Command::SetPreamp { db } if before.as_ref().is_some_and(|cfg| *db > cfg.preamp_db) => {
+                    deferred.push(Command::SetPreamp { db: *db });
+                    return false;
+                }
+                _ => {}
+            }
+            true
+        });
+        commands.push(convolution);
+        commands.extend(deferred);
     }
+    Ok(commands)
 }
 
 fn route(client: &mut SyncClient, output: Option<&str>) -> Result<Option<String>, String> {
@@ -174,7 +195,7 @@ impl Engine {
     }
 
     pub fn start(directory: &Path) -> Self {
-        let spline_path = directory.join("live-spline.wav");
+        let ir_path = directory.join("live-eq.wav");
         let shared = Arc::new(Mutex::new(Shared { status: "Starting audio engine…".into(), ..Shared::default() }));
         let running = Arc::new(AtomicBool::new(true));
         let state = shared.clone();
@@ -206,13 +227,14 @@ impl Engine {
                     }
                 };
                 let session = (|| -> Result<(), String> {
-                    // This UI deliberately exposes only EQ, preamp and balance.
+                    // The app renders its buffered modes into one IR, including
+                    // both the parametric and spline parts of the curve.
                     request(&mut client, Command::ClearConvolutionIr)?;
                     request(&mut client, Command::SetDither { bits: None })?;
                     request(&mut client, Command::SetPhaseMode { linear: false })?;
-                    let mut applied: Option<(AudioFormat, Arc<Config>)> = None;
-                    let mut installed_spline: Option<(u32, Vec<Band>)> = None;
-                    let mut last_spline_edit = None::<Instant>;
+                    let mut applied: Option<(AudioFormat, Arc<PlaybackSettings>)> = None;
+                    let mut installed_filter: Option<phase::Filter> = None;
+                    let mut last_filter_edit = None::<Instant>;
                     let mut route_pending = if cfg!(windows) { None } else { Some(pinned_output.clone()) };
                     let mut route_error = None;
                     let mut capture = crate::scope::Capture::default();
@@ -328,34 +350,41 @@ impl Engine {
                             }
                             s.prepared_for(&format)
                         };
-                        let status = if let Some(cfg) = prepared {
-                            let previous = applied.as_ref().filter(|(on, _)| *on == format).map(|(_, cfg)| cfg.as_ref());
-                            let rate = format.sample_rate.round() as u32;
-                            let new_spline = active_spline(&cfg).map(|points| (rate, points));
-                            let old_spline = installed_spline.as_ref().map(|(rate, points)| (*rate, points.as_slice()));
-                            let requested_spline = new_spline.as_ref().map(|(rate, points)| (*rate, points.as_ref()));
-                            let spline_changed = old_spline != requested_spline;
-                            let should_wait = spline_changed && old_spline.zip(requested_spline)
-                                .is_some_and(|(old, new)| old.0 == new.0)
-                                && last_spline_edit.is_some_and(|last| last.elapsed() < Duration::from_millis(80));
-                            if (previous.is_none_or(|previous| !std::ptr::eq(previous, cfg.as_ref())) || spline_changed) && !should_wait {
-                                if spline_changed && new_spline.is_none() {
-                                    update_spline(&mut client, &spline_path, None, rate)?;
-                                }
-                                for command in update_plan(previous, &cfg, format.channels, format.sample_rate)? {
-                                    if !alive.load(Ordering::Relaxed) { return Ok(()); }
-                                    request(&mut client, command)?;
-                                }
-                                if spline_changed {
-                                    if let Some((rate, points)) = requested_spline {
-                                        update_spline(&mut client, &spline_path, Some(points), rate)?;
+                        let status = if let Some(settings) = prepared {
+                            let previous = applied.as_ref().filter(|(on, _)| *on == format)
+                                .map(|(_, settings)| settings);
+                            if previous.is_none_or(|old| !Arc::ptr_eq(old, &settings)) {
+                                settings.config.validate()?;
+                                let rate = format.sample_rate.round() as u32;
+                                let filter = phase::Filter::new(settings.phase_mode, &settings.config, rate);
+                                let filter_changed = installed_filter != filter;
+                                let same_mode_and_rate = installed_filter.as_ref().zip(filter.as_ref())
+                                    .is_some_and(|(old, new)| old.mode == new.mode && old.sample_rate == new.sample_rate);
+                                let should_wait = filter_changed && same_mode_and_rate
+                                    && last_filter_edit.is_some_and(|last| last.elapsed() < Duration::from_millis(80));
+                                if !should_wait {
+                                    let convolution = if filter_changed {
+                                        Some(match &filter {
+                                            Some(filter) => {
+                                                crate::storage::write_text(&ir_path, &filter.wav()?)
+                                                    .map_err(|error| format!("Could not save EQ filter: {error}"))?;
+                                                Command::SetConvolutionIr { path: ir_path.to_string_lossy().into_owned() }
+                                            }
+                                            None => Command::ClearConvolutionIr,
+                                        })
+                                    } else { None };
+                                    for command in playback_plan(previous.map(Arc::as_ref), &settings, &format, convolution)? {
+                                        if !alive.load(Ordering::Relaxed) { return Ok(()); }
+                                        request(&mut client, command)?;
                                     }
-                                    installed_spline = new_spline.map(|(rate, points)| (rate, points.into_owned()));
-                                    last_spline_edit = Some(Instant::now());
+                                    if filter_changed {
+                                        installed_filter = filter;
+                                        last_filter_edit = Some(Instant::now());
+                                    }
+                                    applied = Some((format, settings.clone()));
                                 }
-                                applied = Some((format, cfg.clone()));
                             }
-                            if cfg.bypass { "Bypassed · original audio" } else { "Engine connected · settings sent" }
+                            if settings.config.bypass { "Bypassed · original audio" } else { "Engine connected · settings sent" }
                         } else {
                             // The UI selects the linked preset and calculates headroom
                             // for this format before we send any settings for it.
@@ -400,14 +429,14 @@ impl Engine {
                     let _ = process.wait();
                 }
             }
-            let _ = std::fs::remove_file(spline_path);
+            let _ = std::fs::remove_file(ir_path);
         });
         Self { shared, running, worker: Some(worker) }
     }
 
-    pub fn submit(&self, format: &AudioFormat, cfg: Config) {
+    pub fn submit(&self, format: &AudioFormat, config: Config, phase_mode: phase::Mode) {
         let mut shared = self.shared.lock().unwrap();
-        shared.prepared = Some((format.clone(), Arc::new(cfg)));
+        shared.prepared = Some((format.clone(), Arc::new(PlaybackSettings { config, phase_mode })));
     }
 }
 
@@ -453,15 +482,16 @@ mod tests {
         let (before, _) = crate::listening::prepare(&before, None, true, 48000.0, 2);
         let (mut after, _) = crate::listening::prepare(&after, None, true, 48000.0, 2);
         assert!(update_plan(Some(&before), &after, 2, 48000.0).unwrap().is_empty());
-        assert!(active_spline(&after).is_none());
+        assert!(phase::Filter::new(phase::Mode::Minimum, &after, 48000).is_none());
         after.bands[3].gain_db -= 2.0;
         let (after, _) = crate::listening::prepare(&after, None, true, 48000.0, 2);
         let mut parametric = after.clone();
         parametric.convert_to_parametric();
         let (parametric, _) = crate::listening::prepare(&parametric, None, true, 48000.0, 2);
         assert!(!parametric.spline);
-        assert!(active_spline(&after).is_some());
-        assert_eq!(active_spline(&parametric), active_spline(&after));
+        let spline = phase::Filter::new(phase::Mode::Minimum, &after, 48000);
+        assert!(spline.is_some());
+        assert!(phase::Filter::new(phase::Mode::Minimum, &parametric, 48000) == spline);
         assert_eq!(parametric.preamp_db, after.preamp_db);
         assert!(update_plan(Some(&after), &parametric, 2, 48000.0).unwrap().is_empty());
     }
@@ -526,18 +556,47 @@ mod tests {
     fn a_prepared_preset_is_scoped_to_the_output_and_audio_format() {
         let old = AudioFormat { channels: 2, sample_rate: 48000.0, output: Some("USB DAC".into()) };
         let mut state = Shared {
-            prepared: Some((old.clone(), Arc::new(Config::default()))),
+            prepared: Some((old.clone(), Arc::new(PlaybackSettings {
+                config: Config::default(), phase_mode: phase::Mode::Minimum,
+            }))),
             ..Shared::default()
         };
         let new = AudioFormat { output: Some("Speakers".into()), ..old.clone() };
         assert!(state.prepared_for(&new).is_none());
         let other_rate = AudioFormat { sample_rate: 96000.0, ..new.clone() };
         assert!(state.prepared_for(&other_rate).is_none());
-        let new_cfg = Config { preamp_db: -6.0, ..Config::default() };
-        let new_cfg = Arc::new(new_cfg);
+        let new_cfg = Arc::new(PlaybackSettings {
+            config: Config { preamp_db: -6.0, ..Config::default() }, phase_mode: phase::Mode::Zero,
+        });
         state.prepared = Some((new.clone(), new_cfg.clone()));
-        assert_eq!(state.prepared_for(&new), Some(new_cfg));
+        assert!(Arc::ptr_eq(&state.prepared_for(&new).unwrap(), &new_cfg));
         assert!(state.prepared_for(&old).is_none());
+    }
+
+    #[test]
+    fn phase_switch_installs_only_the_selected_filter_before_enabling_eq() {
+        let format = AudioFormat { channels: 2, sample_rate: 48000.0, output: None };
+        let mut cfg = Config::default();
+        cfg.bands[0].gain_db = 6.0;
+        let minimum = PlaybackSettings { config: cfg.clone(), phase_mode: phase::Mode::Minimum };
+        let zero = PlaybackSettings { config: cfg.clone(), phase_mode: phase::Mode::Zero };
+        let load = Command::SetConvolutionIr { path: "live-eq.wav".into() };
+        let commands = playback_plan(Some(&minimum), &zero, &format, Some(load)).unwrap();
+        assert!(matches!(commands.as_slice(), [
+            Command::ApplyState { enabled: false, bands, .. }, Command::ClearRouting,
+            Command::SetConvolutionIr { .. }, Command::SetPower { enabled: true },
+        ] if bands.is_empty()));
+
+        let commands = playback_plan(Some(&zero), &minimum, &format, Some(Command::ClearConvolutionIr)).unwrap();
+        assert!(matches!(commands.as_slice(), [
+            Command::ApplyState { enabled: false, bands, .. }, Command::ClearRouting,
+            Command::ClearConvolutionIr, Command::SetPower { enabled: true },
+        ] if bands.len() == cfg.bands.len()));
+
+        cfg.bypass = true;
+        let bypass = PlaybackSettings { config: cfg, phase_mode: phase::Mode::Zero };
+        assert!(matches!(playback_plan(Some(&zero), &bypass, &format, Some(Command::ClearConvolutionIr)).unwrap().as_slice(),
+            [Command::SetPower { enabled: false }, Command::ClearConvolutionIr]));
     }
 
     #[test]

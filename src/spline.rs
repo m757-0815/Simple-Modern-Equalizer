@@ -23,7 +23,10 @@ pub fn gain_at(points: &[Band], frequency: f64) -> f64 {
 }
 
 pub fn kernel_wav(points: &[Band], sample_rate: u32) -> Vec<u8> {
-    let taps = kernel(points, sample_rate);
+    wav(&kernel(points, sample_rate), sample_rate)
+}
+
+pub fn wav(taps: &[f64], sample_rate: u32) -> Vec<u8> {
     let data_size = (taps.len() * 4) as u32;
     let mut wav = Vec::with_capacity(44 + data_size as usize);
     wav.extend(b"RIFF");
@@ -38,7 +41,7 @@ pub fn kernel_wav(points: &[Band], sample_rate: u32) -> Vec<u8> {
     wav.extend(32_u16.to_le_bytes());
     wav.extend(b"data");
     wav.extend(data_size.to_le_bytes());
-    for tap in taps {
+    for &tap in taps {
         wav.extend((tap as f32).to_le_bytes());
     }
     wav

@@ -201,6 +201,8 @@ struct TailChannelState {
     fdl: VecDeque<Vec<Complex<f64>>>,
     /// Spectrum accumulator built up across the cycle's MAC phases.
     acc: Vec<Complex<f64>>,
+    /// Keep the old coefficients through an in-progress accumulation on an IR swap.
+    retained_partitions: Option<IrPartitions>,
     /// Tail output segment being emitted this cycle.
     out: Vec<f64>,
     /// Tail output segment being computed this cycle (emitted next cycle).
@@ -218,6 +220,7 @@ impl TailChannelState {
                 .map(|_| vec![Complex::new(0.0, 0.0); TAIL_FFT_LEN])
                 .collect(),
             acc: vec![Complex::new(0.0, 0.0); TAIL_FFT_LEN],
+            retained_partitions: None,
             out: vec![0.0; TAIL_BLOCK],
             next: vec![0.0; TAIL_BLOCK],
             phase: 0,
@@ -231,11 +234,14 @@ impl TailChannelState {
             spec.fill(Complex::new(0.0, 0.0));
         }
         self.acc.fill(Complex::new(0.0, 0.0));
+        self.retained_partitions = None;
         self.out.fill(0.0);
         self.next.fill(0.0);
         self.phase = 0;
     }
 }
+
+type IrPartitions = Arc<Vec<Vec<Vec<Complex<f64>>>>>;
 
 /// The prepared kernel: IR partition spectra at the current DSP rate plus the
 /// per-channel runtime state and FFT plans/scratch.
@@ -243,7 +249,7 @@ impl TailChannelState {
 struct Kernel {
     /// `[ir_channel][partition][bin]`, with the inverse-FFT 1/N normalisation
     /// folded in at load time. Shared so cloning a chain never re-transforms.
-    partitions: Arc<Vec<Vec<Vec<Complex<f64>>>>>,
+    partitions: IrPartitions,
     /// Tail-stage kernel, present only when the IR outgrows [`HEAD_LEN`].
     tail: Option<TailKernel>,
     /// Taps convolved at the DSP rate (post-resample, post-cap).
@@ -263,7 +269,7 @@ struct Kernel {
 #[derive(Clone)]
 struct TailKernel {
     /// `[ir_channel][partition][bin]` at [`TAIL_FFT_LEN`], 1/N folded in.
-    partitions: Arc<Vec<Vec<Vec<Complex<f64>>>>>,
+    partitions: IrPartitions,
     fft: Arc<dyn Fft<f64>>,
     ifft: Arc<dyn Fft<f64>>,
     /// Forward-FFT working buffer for completed tail blocks.
@@ -441,6 +447,7 @@ impl Kernel {
                     ts.fdl.push_front(oldest);
                 }
                 ts.acc.fill(Complex::new(0.0, 0.0));
+                ts.retained_partitions = None;
             }
 
             // Stash this sub-block's input for the tail block in progress
@@ -449,7 +456,7 @@ impl Kernel {
 
             // This phase's slice of the tail delay-line MAC — spread so no
             // single sub-block pays for the whole line.
-            let parts = &tk.partitions[ir_ch];
+            let parts = &ts.retained_partitions.as_ref().unwrap_or(&tk.partitions)[ir_ch];
             let chunk = parts.len().div_ceil(RATIO);
             let lo = (ts.phase * chunk).min(parts.len());
             let hi = ((ts.phase + 1) * chunk).min(parts.len());
@@ -536,6 +543,30 @@ impl ConvolutionEngine {
         self.source = Some(ir);
         self.enabled = true;
         Ok(())
+    }
+
+    /// Preserve the stream history when replacing an active IR with one of
+    /// matching format and length. Commit by replacing `previous` with `self`.
+    pub fn reuse_history_from(&mut self, previous: &mut Self) {
+        if !self.enabled || !previous.enabled || self.sample_rate != previous.sample_rate
+            || self.channels != previous.channels
+        {
+            return;
+        }
+        let (Some(next), Some(old)) = (&mut self.kernel, &mut previous.kernel) else { return };
+        if next.taps != old.taps || next.partitions.len() != old.partitions.len() {
+            return;
+        }
+        if let Some(tail) = &old.tail {
+            for channel in &mut old.state {
+                if let Some(state) = channel.tail.as_mut()
+                    && state.phase != 0 && state.retained_partitions.is_none()
+                {
+                    state.retained_partitions = Some(Arc::clone(&tail.partitions));
+                }
+            }
+        }
+        std::mem::swap(&mut next.state, &mut old.state);
     }
 
     /// Drop the IR entirely (passthrough, zero latency).
@@ -763,6 +794,32 @@ mod tests {
                 ((x >> 11) as f64) / ((1u64 << 53) as f64) - 0.5
             })
             .collect()
+    }
+
+    #[test]
+    fn same_length_ir_edits_reuse_the_running_delay_line() {
+        let rate = 48_000.0;
+        let delay = 11_744;
+        let load = |gain| {
+            let mut taps = vec![0.0; 2 * delay + 1];
+            taps[delay] = gain;
+            let mut engine = ConvolutionEngine::new(2, rate);
+            engine.load_ir(ir_from_taps(vec![taps], rate)).unwrap();
+            engine
+        };
+        let mut old = load(1.0);
+        let mut warmup = vec![0.25; 2 * (delay + 3 * TAIL_BLOCK + 73)];
+        old.process(&mut warmup, 2);
+        assert!((warmup.last().unwrap() - 0.25).abs() < 1e-9);
+
+        let mut new = load(2.0);
+        new.reuse_history_from(&mut old);
+        let mut output = vec![0.25; 2 * 3 * TAIL_BLOCK];
+        for chunk in output.chunks_mut(2 * 193) {
+            new.process(chunk, 2);
+        }
+        assert!(output.iter().all(|&value| (value - 0.25).abs() < 1e-9 || (value - 0.5).abs() < 1e-9));
+        assert!((output.last().unwrap() - 0.5).abs() < 1e-9);
     }
 
     #[test]
