@@ -1166,6 +1166,72 @@ fn settings_and_preset_popups_fit_and_scroll_on_a_short_tile() {
 }
 
 #[test]
+fn preset_menu_sizes_to_its_list_and_resizes_from_the_corner() {
+    use slint::private_unstable_api::re_exports::{ItemRc, LogicalPoint, WindowInner};
+
+    let ui = window();
+    let presets = crate::presets::Preset::bundled().unwrap();
+    let last = presets.last().unwrap().config.name.clone();
+    ui.set_presets(crate::text_model(
+        presets.into_iter().map(|preset| preset.config.name),
+    ));
+    ui.show().unwrap();
+    let open = element(&ui, "Select Preset", AccessibleRole::Button);
+    let popup = || {
+        let popups = WindowInner::from_pub(ui.window()).active_popups();
+        ItemRc::new_root(popups[0].component.clone())
+    };
+    let size = || {
+        let size = popup().geometry().size;
+        LogicalSize::new(size.width, size.height)
+    };
+    let origin = || popup().map_to_native_window(LogicalPoint::zero());
+    open.invoke_accessible_default_action();
+
+    let original = size();
+    let right_edge = origin().x + original.width;
+    assert!(original.width >= 500.0);
+    assert!(ElementHandle::find_by_accessible_label(&ui, &last).next().is_some());
+    let delete = element(&ui, &format!("Delete {last}"), AccessibleRole::Button);
+    assert!(delete.size().width <= 40.0);
+
+    let drag_corner = |dx, dy| {
+        let grip = element(&ui, "Preset menu size", AccessibleRole::Slider);
+        let corner = grip.absolute_position();
+        let origin = origin();
+        let target = LogicalPosition::new(
+            origin.x + corner.x + grip.size().width / 2.0 + dx,
+            origin.y + corner.y + grip.size().height / 2.0 + dy,
+        );
+        grip.mock_drag(target, PointerEventButton::Left);
+        i_slint_backend_testing::mock_elapsed_time(std::time::Duration::from_millis(16));
+    };
+    drag_corner(-120.0, 60.0);
+    let resized = size();
+    assert_eq!(
+        resized,
+        LogicalSize::new(original.width + 120.0, original.height + 60.0),
+    );
+    assert_eq!(origin().x + resized.width, right_edge);
+
+    drag_corner(60.0, -120.0);
+    let smaller = size();
+    assert_eq!(
+        smaller,
+        LogicalSize::new(original.width + 60.0, original.height - 60.0),
+    );
+    assert_eq!(origin().x + smaller.width, right_edge);
+
+    ui.invoke_dismiss_presets();
+    open.invoke_accessible_default_action();
+    assert_eq!(size(), smaller);
+    ui.window().set_size(LogicalSize::new(480.0, 360.0));
+    i_slint_backend_testing::mock_elapsed_time(std::time::Duration::from_millis(16));
+    let compact = size();
+    assert!(compact.width <= 460.0 && compact.height <= 340.0);
+}
+
+#[test]
 fn wheel_and_brightness_apply_the_selected_accent() {
     let ui = window();
     let weak = ui.as_weak();

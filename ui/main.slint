@@ -702,6 +702,8 @@ export component MainWindow inherits Window {
     callback name-preset(bool, string) -> string;
     callback overwrite-preset() -> string;
     private property <string> preset-overwrite-message;
+    private property <length> preset-menu-width;
+    private property <length> preset-menu-height;
     callback assign-preset(bool);
     callback change-headroom(bool);
     callback capture-a();
@@ -1952,133 +1954,245 @@ export component MainWindow inherits Window {
         }
     }
     preset-menu := PopupWindow {
-        width: 440px;
-        height: min(root.height - 20px, min(480px, 200px + root.presets.length * 39px
-            + (root.preset-overwrite-message == "" ? 0px : 20px)));
-        x: clamp(preset-menu-button.absolute-position.x + preset-menu-button.width - self.width, 10px, root.width - self.width - 10px);
-        y: clamp(preset-menu-button.absolute-position.y + preset-menu-button.height + 8px, 10px, root.height - self.height - 10px);
+        private property <length> inset: 12px;
+        private property <length> section-gap: 8px;
+        private property <length> maximum-menu-width: root.width - 20px;
+        private property <length> minimum-menu-width: min(430px, self.maximum-menu-width);
+        private property <length> chrome-height: preset-controls.min-height + 2 * self.inset + 2 * self.section-gap + 18px;
+        private property <length> minimum-menu-height: min(root.height - 20px, self.chrome-height + 50px);
+        private property <length> maximum-menu-height: root.height - self.y - 10px;
+        private property <length> natural-height: self.chrome-height + max(50px, preset-rows.height + 4px);
+        private property <length> menu-width: clamp(root.preset-menu-width > 0px ? root.preset-menu-width : 540px,
+            self.minimum-menu-width, self.maximum-menu-width);
+        width: self.menu-width;
+        height: clamp(root.preset-menu-height > 0px ? root.preset-menu-height : self.natural-height,
+            self.minimum-menu-height, self.maximum-menu-height);
+        x: root.width - self.menu-width - 10px;
+        y: clamp(preset-menu-button.absolute-position.y + preset-menu-button.height + 8px,
+            10px, root.height - self.minimum-menu-height - 10px);
         close-policy: close-on-click-outside;
-        Rectangle {
-            background: Graphite.window;
-            border-color: Graphite.border;
-            border-width: 1px;
-            border-radius: 10px;
+
+        function resize-to(width: length, height: length) {
+            root.preset-menu-width = clamp(width, self.minimum-menu-width, self.maximum-menu-width);
+            root.preset-menu-height = clamp(height, self.minimum-menu-height, self.maximum-menu-height);
+        }
+
+        Panel {
             VerticalLayout {
-                padding: 12px;
-                spacing: 6px;
-                HorizontalLayout {
-                    spacing: 8px;
-                    Button {
-                        text: "Save as Preset"; enabled: !root.listening-to-a;
-                        Tooltip { text: @markdown("Save the active tuning as a new preset."); }
-                        clicked => { name-form.open(false); }
-                    }
-                    Button {
-                        text: "Rename"; enabled: root.can-rename;
-                        Tooltip { text: @markdown("Rename the selected custom preset."); }
-                        clicked => { name-form.open(true); }
-                    }
-                    Button {
-                        text: "Overwrite Preset"; enabled: root.can-rename && !root.simple-layout;
-                        Tooltip { text: @markdown("Replace the selected custom preset with the current Standard tuning."); }
-                        clicked => {
-                            let error = root.overwrite-preset();
-                            root.preset-overwrite-message = error == "" ? "Preset updated." : error;
-                        }
-                    }
-                }
-                HorizontalLayout {
-                    Button {
-                        text: "Import Equalizer APO";
-                        enabled: !root.listening-to-a;
-                        Tooltip { text: @markdown("Import an Equalizer APO text file and save it as a preset."); }
-                        clicked => { preset-menu.close(); root.import-apo(); }
-                    }
-                    Rectangle { horizontal-stretch: 1; }
-                }
-                if root.preset-overwrite-message != "": Label {
-                    text: root.preset-overwrite-message;
-                    overflow: elide;
-                }
-                name-form := VerticalLayout {
-                    private property <bool> naming;
-                    private property <bool> renaming;
-                    private property <string> error;
-                    function open(rename: bool) {
-                        self.naming = true;
-                        self.renaming = rename;
-                        self.error = "";
-                        preset-name.text = rename && root.preset-index >= 0 ? root.presets[root.preset-index] : "";
-                        preset-name.focus();
-                    }
-                    function submit() {
-                        self.error = root.name-preset(self.renaming, preset-name.text);
-                        if (self.error == "") { self.naming = false; }
-                    }
-                    spacing: 4px;
+                padding: preset-menu.inset;
+                spacing: preset-menu.section-gap;
+                preset-controls := VerticalLayout {
+                    spacing: 6px;
                     HorizontalLayout {
-                        visible: name-form.naming;
-                        spacing: 6px;
-                        preset-name := LineEdit {
-                            placeholder-text: "Preset name";
-                            Tooltip { text: @markdown("Enter a name for the preset."); }
-                            accepted => { name-form.submit(); }
+                        spacing: 8px;
+                        Button {
+                            text: "Save as Preset"; enabled: !root.listening-to-a;
+                            Tooltip { text: @markdown("Save the active tuning as a new preset."); }
+                            clicked => { name-form.open(false); }
                         }
-                        Button { text: "Save"; clicked => { name-form.submit(); } Tooltip { text: @markdown("Save this preset name."); } }
-                        Button { text: "Cancel"; clicked => { name-form.naming = false; } Tooltip { text: @markdown("Close without saving."); } }
+                        Button {
+                            text: "Rename"; enabled: root.can-rename;
+                            Tooltip { text: @markdown("Rename the selected custom preset."); }
+                            clicked => { name-form.open(true); }
+                        }
+                        Button {
+                            text: "Overwrite Preset"; enabled: root.can-rename && !root.simple-layout;
+                            Tooltip { text: @markdown("Replace the selected custom preset with the current Standard tuning."); }
+                            clicked => {
+                                let error = root.overwrite-preset();
+                                root.preset-overwrite-message = error == "" ? "Preset updated." : error;
+                            }
+                        }
                     }
-                    if self.naming && self.error != "": Label { text: name-form.error; color: Appearance.accent; }
-                }
-                Label {
-                    text: root.active-output-label == "" ? "No active playback output"
-                        : root.active-output-label + (root.output-mapping == "" ? "" : " · " + root.output-mapping);
-                    overflow: elide;
-                }
-                HorizontalLayout {
-                    spacing: 8px;
-                    Button {
-                        text: "Use preset for this output"; enabled: root.can-assign;
-                        Tooltip { text: @markdown("Load this preset automatically for the current output."); }
-                        clicked => { root.assign-preset(true); }
+                    HorizontalLayout {
+                        Button {
+                            text: "Import Equalizer APO";
+                            enabled: !root.listening-to-a;
+                            Tooltip { text: @markdown("Import an Equalizer APO text file and save it as a preset."); }
+                            clicked => { preset-menu.close(); root.import-apo(); }
+                        }
+                        Rectangle { horizontal-stretch: 1; }
                     }
-                    Button {
-                        text: "Remove link"; enabled: root.can-unassign;
-                        Tooltip { text: @markdown("Remove the preset linked to this output."); }
-                        clicked => { root.assign-preset(false); }
+                    if root.preset-overwrite-message != "": Label {
+                        text: root.preset-overwrite-message;
+                        overflow: elide;
+                    }
+                    name-form := VerticalLayout {
+                        private property <bool> naming;
+                        private property <bool> renaming;
+                        private property <string> error;
+                        visible: self.naming;
+                        height: self.naming ? self.min-height : 0px;
+                        function open(rename: bool) {
+                            self.naming = true;
+                            self.renaming = rename;
+                            self.error = "";
+                            preset-name.text = rename && root.preset-index >= 0 ? root.presets[root.preset-index] : "";
+                            preset-name.focus();
+                        }
+                        function submit() {
+                            self.error = root.name-preset(self.renaming, preset-name.text);
+                            if (self.error == "") { self.naming = false; }
+                        }
+                        spacing: 4px;
+                        HorizontalLayout {
+                            spacing: 6px;
+                            preset-name := LineEdit {
+                                placeholder-text: "Preset name";
+                                Tooltip { text: @markdown("Enter a name for the preset."); }
+                                accepted => { name-form.submit(); }
+                            }
+                            Button { text: "Save"; clicked => { name-form.submit(); } Tooltip { text: @markdown("Save this preset name."); } }
+                            Button { text: "Cancel"; clicked => { name-form.naming = false; } Tooltip { text: @markdown("Close without saving."); } }
+                        }
+                        if self.naming && self.error != "": Label { text: name-form.error; color: Appearance.accent; }
+                    }
+                    Label {
+                        text: root.active-output-label == "" ? "No active playback output"
+                            : root.active-output-label + (root.output-mapping == "" ? "" : " · " + root.output-mapping);
+                        overflow: elide;
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Button {
+                            text: "Use preset for this output"; enabled: root.can-assign;
+                            Tooltip { text: @markdown("Load this preset automatically for the current output."); }
+                            clicked => { root.assign-preset(true); }
+                        }
+                        Button {
+                            text: "Remove link"; enabled: root.can-unassign;
+                            Tooltip { text: @markdown("Remove the preset linked to this output."); }
+                            clicked => { root.assign-preset(false); }
+                        }
                     }
                 }
-                ScrollView {
+                preset-scroll := ScrollView {
                     vertical-stretch: 1;
                     horizontal-scrollbar-policy: always-off;
-                    VerticalLayout {
-                        padding: 5px;
+                    content-width: self.visible-width;
+                    content-height: preset-rows.height;
+                    function clamp-scroll() {
+                        self.content-y = clamp(self.content-y, min(0px, self.visible-height - self.content-height), 0px);
+                    }
+                    changed content-height => { self.clamp-scroll(); }
+                    changed visible-height => { self.clamp-scroll(); }
+                    preset-rows := VerticalLayout {
+                        width: preset-scroll.content-width;
+                        height: self.min-height;
+                        padding-right: 22px;
                         spacing: 4px;
                         if root.presets.length == 0: Label { text: "No saved presets"; }
                         for name[index] in root.presets: HorizontalLayout {
                             height: 35px;
                             spacing: 6px;
                             Rectangle {
-                                clip: true;
                                 horizontal-stretch: 1;
+                                min-width: 0px;
                                 Button {
                                     width: parent.width;
                                     height: parent.height;
-                                    min-width: 0px;
-                                    text: name + (index == root.preset-index ? " (selected)" : "");
+                                    accessible-label: preset-caption.text;
                                     Tooltip { text: @markdown("Load this preset."); }
                                     clicked => {
                                         root.choose-preset(index);
                                         preset-menu.close();
                                     }
                                 }
+                                preset-caption := Label {
+                                    x: 10px;
+                                    width: max(0px, parent.width - 20px);
+                                    height: parent.height;
+                                    text: name + (index == root.preset-index ? " (selected)" : "");
+                                    color: Graphite.text;
+                                    font-size: 14px;
+                                    overflow: elide;
+                                }
                             }
-                            Button {
-                                text: "Delete";
-                                accessible-label: "Delete " + name;
-                                clicked => { root.request-preset-deletion(index); }
+                            Rectangle {
+                                width: 35px;
+                                Button {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    accessible-label: "Delete " + name;
+                                    Tooltip { text: @markdown("Delete this preset."); }
+                                    clicked => { root.request-preset-deletion(index); }
+                                }
+                                Path {
+                                    width: 16px;
+                                    height: 16px;
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                    stroke: Graphite.text;
+                                    stroke-width: 1.5px;
+                                    commands: "M 1.5 4 L 14.5 4 M 5.5 4 L 5.5 2 L 10.5 2 L 10.5 4 M 3 4 L 4 14 L 12 14 L 13 4 M 6.5 6.5 L 6.5 11.5 M 9.5 6.5 L 9.5 11.5";
+                                }
                             }
                         }
                     }
+                }
+                HorizontalLayout {
+                    height: 18px;
+                    preset-resize := Rectangle {
+                        width: 22px;
+                        border-radius: 4px;
+                        border-color: Appearance.accent;
+                        border-width: resize-focus.has-focus ? 1px : 0px;
+                        forward-focus: resize-focus;
+                        accessible-role: slider;
+                        accessible-label: "Preset menu size";
+                        accessible-value: preset-menu.height / 1px;
+                        accessible-value-minimum: preset-menu.minimum-menu-height / 1px;
+                        accessible-value-maximum: preset-menu.maximum-menu-height / 1px;
+                        accessible-action-increment => { preset-menu.resize-to(preset-menu.width, preset-menu.height + 20px); }
+                        accessible-action-decrement => { preset-menu.resize-to(preset-menu.width, preset-menu.height - 20px); }
+
+                        Path {
+                            x: 4px;
+                            y: 3px;
+                            width: 12px;
+                            height: 12px;
+                            stroke: resize-touch.has-hover || resize-touch.pressed ? Appearance.accent : Graphite.secondary;
+                            stroke-width: 1.5px;
+                            commands: "M 1 11 L 11 1 M 1 6 L 6 1 M 6 11 L 11 6";
+                        }
+                        Tooltip { text: @markdown("Drag this corner to resize the preset menu."); }
+                        resize-focus := FocusScope {
+                            key-pressed(event) => {
+                                let width-step = event.text == Key.LeftArrow ? 20px : (event.text == Key.RightArrow ? -20px : 0px);
+                                let height-step = event.text == Key.DownArrow ? 20px : (event.text == Key.UpArrow ? -20px : 0px);
+                                if width-step != 0px || height-step != 0px {
+                                    preset-menu.resize-to(preset-menu.width + width-step, preset-menu.height + height-step);
+                                    return accept;
+                                }
+                                return reject;
+                            }
+                        }
+                        resize-touch := TouchArea {
+                            mouse-cursor: nesw-resize;
+                            private property <length> start-x;
+                            private property <length> start-y;
+                            private property <length> start-width;
+                            private property <length> start-height;
+                            pointer-event(event) => {
+                                if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                                    resize-focus.focus();
+                                    self.start-x = self.absolute-position.x + self.mouse-x;
+                                    self.start-y = self.absolute-position.y + self.mouse-y;
+                                    self.start-width = preset-menu.width;
+                                    self.start-height = preset-menu.height;
+                                }
+                            }
+                            moved => {
+                                if self.pressed {
+                                    // Slint keeps grabbed pointer events relative to the popup's starting origin.
+                                    let x = self.absolute-position.x + self.mouse-x;
+                                    let y = self.absolute-position.y + self.mouse-y;
+                                    preset-menu.resize-to(self.start-width - (x - self.start-x), self.start-height + (y - self.start-y));
+                                }
+                            }
+                        }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
                 }
             }
         }
