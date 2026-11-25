@@ -479,15 +479,15 @@ mod tests {
         let mut after = before.clone();
         after.convert_to_spline(48000.0);
         let after = Config::from_json(&serde_json::to_string(&after).unwrap()).unwrap();
-        let (before, _) = crate::listening::prepare(&before, None, true, 48000.0, 2);
-        let (mut after, _) = crate::listening::prepare(&after, None, true, 48000.0, 2);
+        let (before, _) = crate::listening::prepare(&before, None, true, 48000.0, 2, phase::Mode::Minimum);
+        let (mut after, _) = crate::listening::prepare(&after, None, true, 48000.0, 2, phase::Mode::Minimum);
         assert!(update_plan(Some(&before), &after, 2, 48000.0).unwrap().is_empty());
         assert!(phase::Filter::new(phase::Mode::Minimum, &after, 48000).is_none());
         after.bands[3].gain_db -= 2.0;
-        let (after, _) = crate::listening::prepare(&after, None, true, 48000.0, 2);
+        let (after, _) = crate::listening::prepare(&after, None, true, 48000.0, 2, phase::Mode::Minimum);
         let mut parametric = after.clone();
         parametric.convert_to_parametric();
-        let (parametric, _) = crate::listening::prepare(&parametric, None, true, 48000.0, 2);
+        let (parametric, _) = crate::listening::prepare(&parametric, None, true, 48000.0, 2, phase::Mode::Minimum);
         assert!(!parametric.spline);
         let spline = phase::Filter::new(phase::Mode::Minimum, &after, 48000);
         assert!(spline.is_some());
@@ -579,8 +579,11 @@ mod tests {
         let mut cfg = Config::default();
         cfg.bands[0].gain_db = 6.0;
         let minimum = PlaybackSettings { config: cfg.clone(), phase_mode: phase::Mode::Minimum };
+        let matched = PlaybackSettings { config: cfg.clone(), phase_mode: phase::Mode::Matched };
         let zero = PlaybackSettings { config: cfg.clone(), phase_mode: phase::Mode::Zero };
         let load = Command::SetConvolutionIr { path: "live-eq.wav".into() };
+        let matched_commands = playback_plan(Some(&minimum), &matched, &format, Some(load.clone())).unwrap();
+        assert!(matches!(matched_commands.as_slice(), [Command::SetConvolutionIr { .. }]));
         let commands = playback_plan(Some(&minimum), &zero, &format, Some(load)).unwrap();
         assert!(matches!(commands.as_slice(), [
             Command::ApplyState { enabled: false, bands, .. }, Command::ClearRouting,

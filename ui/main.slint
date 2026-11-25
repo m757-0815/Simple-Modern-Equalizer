@@ -1590,7 +1590,7 @@ export component MainWindow inherits Window {
                         Label { text: "EQ phase mode"; width: 100px; }
                         Choice {
                             accessible-name: "EQ phase mode";
-                            model: ["Minimum Phase", "Linear Phase", "Zero Phase (Beta)"];
+                            model: ["Minimum Phase", "Matched Phase", "Linear Phase", "Zero Phase (Beta)"];
                             current-index <=> root.phase-mode-index;
                             selected => { root.change-phase-mode(self.current-index); }
                         }

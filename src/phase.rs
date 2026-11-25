@@ -1,6 +1,6 @@
 use crate::{
     config::{Band, Config},
-    spline,
+    matched, spline,
 };
 use resonance_dsp::convolution::BLOCK;
 use resonance_ipc::{BandState, fr::ResponseGrid};
@@ -13,27 +13,28 @@ use std::borrow::Cow;
 pub enum Mode {
     #[default]
     Minimum,
+    Matched,
     Linear,
     Zero,
 }
 
 impl Mode {
-    pub const OPTIONS: [Self; 3] = [Self::Minimum, Self::Linear, Self::Zero];
+    pub const OPTIONS: [Self; 4] = [Self::Minimum, Self::Matched, Self::Linear, Self::Zero];
 
     pub fn index(self) -> i32 {
         self as i32
     }
 
-    pub fn delay_ms(self) -> usize {
+    pub fn delay_budget_ms(self) -> Option<usize> {
         match self {
-            Self::Minimum => 0,
-            Self::Linear => 176,
-            Self::Zero => 250,
+            Self::Linear => Some(176),
+            Self::Zero => Some(250),
+            Self::Minimum | Self::Matched => None,
         }
     }
 
     pub fn biquad_config(self, cfg: &Config) -> Cow<'_, Config> {
-        if self == Self::Minimum {
+        if matches!(self, Self::Minimum | Self::Matched) {
             return Cow::Borrowed(cfg);
         }
         Cow::Owned(Config {
@@ -94,14 +95,26 @@ impl Filter {
         if self.mode == Mode::Minimum {
             return Ok(spline::kernel_wav(&self.spline, self.sample_rate));
         }
-        Ok(spline::wav(&self.centered_kernel()?, self.sample_rate))
+        let taps = if self.mode == Mode::Matched {
+            matched::kernel(&self.bands, &self.spline, self.sample_rate)
+        } else {
+            self.centered_kernel()?
+        };
+        if taps.iter().any(|&tap| !(tap as f32).is_finite()) {
+            return Err("The EQ curve exceeds the audio engine's impulse response range".into());
+        }
+        Ok(spline::wav(&taps, self.sample_rate))
     }
 
     /// Synthesize the combined magnitude with zero phase at the FFT origin.
     /// Move the symmetric response into causal time, reserving one convolution
     /// block so the centered delay and buffering fit the selected budget.
     fn centered_kernel(&self) -> Result<Vec<f64>, String> {
-        let radius = (self.sample_rate as usize * self.mode.delay_ms() / 1000)
+        let budget = self
+            .mode
+            .delay_budget_ms()
+            .expect("centered EQ requires a delay budget");
+        let radius = (self.sample_rate as usize * budget / 1000)
             .checked_sub(BLOCK)
             .filter(|&frames| frames > 0)
             .ok_or("Sample rate is too low for the selected EQ phase mode")?;
@@ -150,9 +163,6 @@ impl Filter {
                 / size as f64;
             taps[radius - offset] = tap;
             taps[radius + offset] = tap;
-        }
-        if taps.iter().any(|&tap| !(tap as f32).is_finite()) {
-            return Err("The EQ curve exceeds the audio engine's impulse response range".into());
         }
         Ok(taps)
     }

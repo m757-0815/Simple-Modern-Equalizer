@@ -134,6 +134,7 @@ pub struct GraphCache {
     other_mode_bands: Option<Vec<Band>>,
     output_offset: f64,
     sample_rate: f64,
+    phase_mode: crate::phase::Mode,
     pub axis: GainAxis,
     curve: Vec<f64>,
     curve_path: Option<Path>,
@@ -144,6 +145,14 @@ pub struct GraphCache {
 }
 
 impl GraphCache {
+    pub fn set_phase_mode(&mut self, mode: crate::phase::Mode) {
+        use crate::phase::Mode::Matched;
+        if (self.phase_mode == Matched) != (mode == Matched) {
+            self.sample_rate = 0.0;
+        }
+        self.phase_mode = mode;
+    }
+
     pub fn set_range(&mut self, range: i32) {
         let axis = GainAxis::new(range);
         if self.axis != axis {
@@ -217,7 +226,7 @@ impl GraphCache {
                 vec![0.0; W]
             } else {
                 let frequencies = RESPONSE_FREQUENCIES.iter().map(|&frequency| frequency.min(rate / 2.0));
-                cfg.response(frequencies, rate)
+                cfg.response_in_mode(frequencies, rate, self.phase_mode)
             };
             self.bands.clone_from(&cfg.bands);
             self.spline_source.clone_from(&cfg.spline_source);
@@ -578,7 +587,7 @@ mod tests {
         assert!(cfg.add_peak(1000.0, 0.0));
         let mut cache = GraphCache::default();
         let mut draw = |cfg: &Config| {
-            let (effective, _) = crate::listening::prepare(cfg, None, true, 48000.0, 2);
+            let (effective, _) = crate::listening::prepare(cfg, None, true, 48000.0, 2, crate::phase::Mode::Minimum);
             cache.frame(&effective, &[], 48000.0, TEST_SIZE);
             cache.update_dots(&effective);
             (cache.dots.clone(), cache.output_bounds(), effective)

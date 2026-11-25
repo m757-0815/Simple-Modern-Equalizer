@@ -47,7 +47,7 @@ pub fn wav(taps: &[f64], sample_rate: u32) -> Vec<u8> {
     wav
 }
 
-fn kernel(points: &[Band], sample_rate: u32) -> Vec<f64> {
+pub(crate) fn kernel(points: &[Band], sample_rate: u32) -> Vec<f64> {
     let size = (sample_rate as usize / 4).next_power_of_two().clamp(8192, 65536);
     let mut spectrum: Vec<_> = (0..size).map(|bin| {
         let frequency = f64::from(sample_rate) * bin.min(size - bin) as f64 / size as f64;

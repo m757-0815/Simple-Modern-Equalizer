@@ -327,13 +327,24 @@ impl Config {
     }
 
     pub fn response(&self, frequencies: impl IntoIterator<Item = f64>, sample_rate: f64) -> Vec<f64> {
+        self.response_in_mode(frequencies, sample_rate, crate::phase::Mode::Minimum)
+    }
+
+    pub fn response_in_mode(&self, frequencies: impl IntoIterator<Item = f64>, sample_rate: f64, mode: crate::phase::Mode) -> Vec<f64> {
         let bands = self.parametric_bands();
+        let evaluate = |frequencies: &mut dyn Iterator<Item = f64>| {
+            if mode == crate::phase::Mode::Matched {
+                crate::matched::response_db(bands, frequencies, sample_rate)
+            } else {
+                parametric_response(bands, frequencies, sample_rate)
+            }
+        };
         let correction = self.spline_correction();
         if correction.iter().all(|point| point.gain_db == 0.0) {
-            return parametric_response(bands, frequencies, sample_rate);
+            return evaluate(&mut frequencies.into_iter());
         }
         let frequencies: Vec<_> = frequencies.into_iter().collect();
-        let mut response = parametric_response(bands, frequencies.iter().copied(), sample_rate);
+        let mut response = evaluate(&mut frequencies.iter().copied());
         for (db, frequency) in response.iter_mut().zip(frequencies) {
             *db += crate::spline::gain_at(&correction, frequency);
         }

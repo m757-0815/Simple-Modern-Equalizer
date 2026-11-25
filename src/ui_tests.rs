@@ -33,13 +33,13 @@ fn playback_settings_offer_all_eq_phase_modes() {
     let choice = element(&ui, "EQ phase mode", AccessibleRole::Combobox);
     assert_eq!(choice.accessible_value().unwrap(), "Minimum Phase");
     choice.invoke_accessible_expand_action();
-    for (index, name) in ["Linear Phase", "Zero Phase (Beta)"].into_iter().enumerate() {
+    for (index, name) in ["Matched Phase", "Linear Phase", "Zero Phase (Beta)"].into_iter().enumerate() {
         key(&ui, Key::DownArrow);
         assert_eq!(ui.get_phase_mode_index(), index as i32 + 1);
         assert_eq!(choice.accessible_value().unwrap(), name);
     }
     key(&ui, Key::Return);
-    assert_eq!(selected.get(), 2);
+    assert_eq!(selected.get(), 3);
 }
 
 #[test]

@@ -7,6 +7,7 @@ mod fit;
 mod graph;
 mod listening;
 mod live;
+mod matched;
 mod monitor;
 mod now_playing;
 mod phase;
@@ -170,7 +171,7 @@ impl App {
         } else if changed {
             let (rate, channels) = self.format.as_ref().map_or((48000.0, 2), |format| (format.sample_rate, format.channels));
             let active = Config { bypass: false, ..self.cfg.clone() };
-            let automatic = listening::prepare(&active, None, true, rate, channels).0.preamp_db;
+            let automatic = listening::prepare(&active, None, true, rate, channels, self.preferences.phase_mode).0.preamp_db;
             let manual = automatic.max(-config::MANUAL_PREAMP_LIMIT_DB);
             if manual != self.cfg.preamp_db {
                 self.cfg.preamp_db = manual;
@@ -216,7 +217,7 @@ impl App {
             self.simple.config(self.cfg.bypass, self.preferences.simple_auto_headroom, self.cfg.balance)
         } else {
             let (b, a) = listening::prepare(&self.cfg, self.reference.as_ref(),
-                self.preferences.auto_headroom, rate, channels);
+                self.preferences.auto_headroom, rate, channels, self.preferences.phase_mode);
             if self.listening_to_a { a.unwrap_or(b) } else { b }
         };
         if let Some(format) = &self.format {
@@ -361,6 +362,7 @@ fn draw_eq_graph(ui: &MainWindow, app: &mut App) {
     let overlay = if ui.get_show_eq_spectrum() { &app.plot_spectrum[..] } else { &[] };
     app.plot.set_colors(app.preferences.colors);
     app.plot.set_range(ui.get_eq_range_db());
+    app.plot.set_phase_mode(app.preferences.phase_mode);
     if let Some(frame) = app.plot.frame(&app.effective, overlay, rate, size) {
         ui.set_graph(slint::Image::from_rgba8(frame));
         let (bottom, top) = app.plot.output_bounds();
@@ -442,11 +444,16 @@ fn update_controls(ui: &MainWindow, app: &App) {
     ui.set_can_unassign(mapped.is_some() && output_ready);
 }
 
-fn update_phase_setting(ui: &MainWindow, mode: phase::Mode) {
+fn update_phase_setting(ui: &MainWindow, app: &App) {
+    let mode = app.preferences.phase_mode;
     ui.set_phase_mode_index(mode.index());
-    let delay = mode.delay_ms();
-    ui.set_phase_mode_detail(if delay == 0 { "".into() }
-        else { format!("Adds up to {delay} ms of EQ buffering.").into() });
+    let detail = if mode == phase::Mode::Matched {
+        let delay = matched::latency_ms(app.fit_rate());
+        format!("Adds about {delay:.1} ms of EQ buffering.")
+    } else {
+        mode.delay_budget_ms().map(|delay| format!("Adds up to {delay} ms of EQ buffering.")).unwrap_or_default()
+    };
+    ui.set_phase_mode_detail(detail.into());
 }
 
 fn refresh_band_rows(ui: &MainWindow, cfg: &Config) {
@@ -791,7 +798,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let simple: simple::SimpleSettings = storage::read_text(&directory.join("simple.json")).ok()
         .and_then(|text| serde_json::from_str(text.trim_start_matches('\u{feff}')).ok()).unwrap_or_default();
     let initial = if simple.active { simple.config(cfg.bypass, preferences.simple_auto_headroom, cfg.balance) } else {
-        listening::prepare(&cfg, None, preferences.auto_headroom, 48000.0, 2).0
+        listening::prepare(&cfg, None, preferences.auto_headroom, 48000.0, 2, preferences.phase_mode).0
     };
     let app = Rc::new(RefCell::new(App { engine: engine::Engine::start(&directory), cfg, simple, presets,
         selected, preferences, active_output: None, fallback: None, reference: None, listening_to_a: false,
@@ -830,7 +837,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ui.set_live_frequency_ticks(Rc::new(VecModel::from(frequency_ticks)).into());
     ui.set_eq_range_db(app.borrow().preferences.eq_range_db());
     update_controls(&ui, &app.borrow());
-    update_phase_setting(&ui, app.borrow().preferences.phase_mode);
+    update_phase_setting(&ui, &app.borrow());
     draw_eq_graph(&ui, &mut app.borrow_mut());
     {
         let state = app.borrow();
@@ -1232,7 +1239,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let error = a.set_phase_mode(mode).err().unwrap_or_default();
             w.set_phase_mode_error(error.into());
         }
-        update_phase_setting(&w, a.preferences.phase_mode);
+        update_phase_setting(&w, &a);
+        update_controls(&w, &a);
+        draw_eq_graph(&w, &mut a);
     });
     on_ui_action!(on_import_apo, |w, a, | {
         if let Some(path) = rfd::FileDialog::new()
@@ -1387,6 +1396,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if update {
                     a.apply_audio();
                     update_controls(&w, &a);
+                    update_phase_setting(&w, &a);
                 }
                 if w.get_active_output_label() == "" {
                     w.set_can_assign(false);
@@ -1541,11 +1551,13 @@ mod tests {
         assert_eq!(old.phase_mode, phase::Mode::Minimum);
         assert!(old.auto_headroom);
 
-        app.set_phase_mode(phase::Mode::Zero).unwrap();
-        let saved: Preferences = serde_json::from_str(
-            &storage::read_text(&app.directory.join("preferences.json")).unwrap(),
-        ).unwrap();
-        assert_eq!(saved.phase_mode, phase::Mode::Zero);
+        for mode in [phase::Mode::Zero, phase::Mode::Matched] {
+            app.set_phase_mode(mode).unwrap();
+            let saved: Preferences = serde_json::from_str(
+                &storage::read_text(&app.directory.join("preferences.json")).unwrap(),
+            ).unwrap();
+            assert_eq!(saved.phase_mode, mode);
+        }
         assert_eq!(app.cfg, Config::default());
         fs::remove_dir_all(&app.directory).unwrap();
     }

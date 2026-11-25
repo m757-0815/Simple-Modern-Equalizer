@@ -1,8 +1,8 @@
-use crate::config::Config;
+use crate::{config::Config, phase::Mode};
 
 /// Calculate peak and average gain from the active EQ response.
 /// Equal steps on a log-frequency axis approximate pink-noise excitation.
-fn response(cfg: &Config, sample_rate: f64, channels: usize) -> (f64, f64) {
+fn response(cfg: &Config, sample_rate: f64, channels: usize, mode: Mode) -> (f64, f64) {
     if cfg.bypass {
         return (0.0, 0.0);
     }
@@ -22,7 +22,7 @@ fn response(cfg: &Config, sample_rate: f64, channels: usize) -> (f64, f64) {
             .filter(|band| band.enabled && band.frequency_hz < nyquist)
             .map(|band| band.frequency_hz),
     );
-    let points = cfg.response(audible.chain(critical), sample_rate);
+    let points = cfg.response_in_mode(audible.chain(critical), sample_rate, mode);
     let peak = points.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     let mean_power = points[..1025].iter().map(|db| 10f64.powf(db / 10.0)).sum::<f64>() / 1025.0;
     let (left, right) = cfg.gains();
@@ -40,6 +40,7 @@ pub fn prepare(
     auto_headroom: bool,
     sample_rate: f64,
     channels: usize,
+    mode: Mode,
 ) -> (Config, Option<Config>) {
     let sample_rate = if sample_rate.is_finite() && sample_rate >= 40.0 { sample_rate } else { 48000.0 };
     let mut current = current.clone();
@@ -47,7 +48,7 @@ pub fn prepare(
         return (current, None);
     }
     let metrics = |cfg: &mut Config| {
-        let (peak, average) = response(cfg, sample_rate, channels);
+        let (peak, average) = response(cfg, sample_rate, channels, mode);
         if auto_headroom && !cfg.bypass {
             cfg.preamp_db = (-peak - 0.2).clamp(-60.0, 0.0);
         }
@@ -85,21 +86,21 @@ mod tests {
             band.gain_db = 6.0;
             band.q = 20.0;
         }
-        let (effective, _) = prepare(&cfg, None, true, 48000.0, 2);
+        let (effective, _) = prepare(&cfg, None, true, 48000.0, 2, Mode::Minimum);
         assert!((effective.preamp_db + 12.2).abs() < 0.01);
         cfg.preamp_db = -18.0;
-        assert_eq!(prepare(&cfg, None, true, 48000.0, 2).0.preamp_db, effective.preamp_db);
+        assert_eq!(prepare(&cfg, None, true, 48000.0, 2, Mode::Minimum).0.preamp_db, effective.preamp_db);
         cfg.preamp_db = 6.0;
-        assert_eq!(prepare(&cfg, None, true, 48000.0, 2).0.preamp_db, effective.preamp_db);
+        assert_eq!(prepare(&cfg, None, true, 48000.0, 2, Mode::Minimum).0.preamp_db, effective.preamp_db);
         cfg.bypass = true;
-        assert_eq!(prepare(&cfg, None, true, 48000.0, 2).0, cfg);
+        assert_eq!(prepare(&cfg, None, true, 48000.0, 2, Mode::Minimum).0, cfg);
     }
 
     #[test]
     fn comparison_attenuates_the_louder_side_and_leaves_originals_intact() {
         let quiet = Config { preamp_db: -9.0, ..Config::default() };
         let loud = Config { preamp_db: -3.0, ..Config::default() };
-        let (b, a) = prepare(&loud, Some(&quiet), false, 48000.0, 2);
+        let (b, a) = prepare(&loud, Some(&quiet), false, 48000.0, 2, Mode::Minimum);
         assert!((b.preamp_db + 9.0).abs() < 1e-7);
         assert!((a.unwrap().preamp_db + 9.0).abs() < 1e-7);
         assert_eq!(loud.preamp_db, -3.0);
