@@ -586,7 +586,10 @@ export component MainWindow inherits Window {
     in-out property <int> preset-index: 0;
     in-out property <int> output-index: 0;
     in-out property <int> phase-mode-index: 0;
-    in property <string> phase-mode-detail;
+    private property <[string]> phase-mode-names: ["Minimum Phase", "Matched Phase", "Linear Phase", "Zero Phase (Beta)"];
+    in property <[string]> phase-mode-details: ["", "", "", ""];
+    private property <string> phase-mode-detail: root.phase-mode-index >= 0 && root.phase-mode-index < root.phase-mode-details.length
+        ? root.phase-mode-details[root.phase-mode-index] : "";
     in property <string> phase-mode-error;
     in-out property <int> band-count: 5;
     in-out property <float> preamp;
@@ -1590,9 +1593,15 @@ export component MainWindow inherits Window {
                         Label { text: "EQ phase mode"; width: 100px; }
                         Choice {
                             accessible-name: "EQ phase mode";
-                            model: ["Minimum Phase", "Matched Phase", "Linear Phase", "Zero Phase (Beta)"];
+                            model: root.phase-mode-names;
                             current-index <=> root.phase-mode-index;
                             selected => { root.change-phase-mode(self.current-index); }
+                        }
+                        Button {
+                            text: "i";
+                            width: 28px;
+                            accessible-label: "About EQ phase modes";
+                            clicked => { settings.close(); phase-help.show(); }
                         }
                     }
                     if root.phase-mode-detail != "": Label {
@@ -1638,6 +1647,87 @@ export component MainWindow inherits Window {
                             text: "About";
                             Tooltip { text: @markdown("See the app version, copyright, and licenses."); }
                             clicked => { settings.close(); root.show-about-license = false; about.show(); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    phase-help := PopupWindow {
+        width: min(510px, root.width - 20px);
+        height: min(500px, root.height - 20px);
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        close-policy: no-auto-close;
+        forward-focus: close-phase-help;
+        function dismiss() {
+            phase-help.close();
+            settings.show();
+        }
+        Panel {
+            FocusScope {
+                width: parent.width;
+                height: parent.height;
+                capture-key-pressed(event) => {
+                    if event.text == Key.Escape {
+                        phase-help.dismiss();
+                        return accept;
+                    }
+                    return reject;
+                }
+                VerticalLayout {
+                    padding: 20px;
+                    spacing: 12px;
+                    PanelHeading { text: "EQ phase modes"; }
+                    help-scroll := ScrollView {
+                        vertical-stretch: 1;
+                        horizontal-scrollbar-policy: always-off;
+                        content-width: self.visible-width;
+                        content-height: help-text.height;
+                        help-text := VerticalLayout {
+                            width: help-scroll.content-width;
+                            height: self.min-height;
+                            padding-right: 8px;
+                            spacing: 12px;
+                            Label {
+                                text: "Gain sets how loud each frequency is. Phase affects how those frequencies line up in time, especially in short sounds like drum hits.";
+                                font-size: 13px;
+                                wrap: word-wrap;
+                                accessible-label: self.text;
+                            }
+                            for description[index] in [
+                                "The default for everyday listening, video and games. It keeps delay low and changes phase around the frequencies you adjust.",
+                                "Approximates the gain and phase of analog peak and shelf filters. The spline curve uses Minimum Phase.",
+                                "Frequency components share the same delay, preserving their phase relationships after alignment. Sharp filters can cause pre-ringing, a small oscillation before the main sound.",
+                                "Preserves phase after delay compensation, like Linear Phase. A longer filter follows narrow bands more closely. Very narrow bass adjustments are still approximated, and pre-ringing is possible."
+                            ]: VerticalLayout {
+                                spacing: 3px;
+                                Text {
+                                    text: root.phase-mode-names[index];
+                                    font-size: 14px;
+                                    color: Graphite.text;
+                                    accessible-label: self.text;
+                                }
+                                Label {
+                                    text: description + (root.phase-mode-details[index] == "" ? "" : " " + root.phase-mode-details[index]);
+                                    font-size: 13px;
+                                    wrap: word-wrap;
+                                    accessible-label: self.text;
+                                }
+                            }
+                            Label {
+                                text: "The added delay can affect lip sync and live monitoring. This setting applies across presets.";
+                                font-size: 13px;
+                                wrap: word-wrap;
+                                accessible-label: self.text;
+                            }
+                        }
+                    }
+                    HorizontalLayout {
+                        Rectangle { horizontal-stretch: 1; }
+                        close-phase-help := Button {
+                            text: "Close";
+                            clicked => { phase-help.dismiss(); }
                         }
                     }
                 }

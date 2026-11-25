@@ -43,6 +43,38 @@ fn playback_settings_offer_all_eq_phase_modes() {
 }
 
 #[test]
+fn phase_help_opens_next_to_the_dropdown_and_returns_to_settings() {
+    let ui = window();
+    ui.window().set_size(LogicalSize::new(683.0, 384.0));
+    ui.set_phase_mode_index(1);
+    ui.show().unwrap();
+    open_settings(&ui);
+
+    let choice = element(&ui, "EQ phase mode", AccessibleRole::Combobox);
+    let help = element(&ui, "About EQ phase modes", AccessibleRole::Button);
+    assert!(help.absolute_position().x > choice.absolute_position().x + choice.size().width);
+    help.invoke_accessible_default_action();
+
+    assert!(ElementHandle::find_by_accessible_label(&ui, "EQ phase modes").next().is_some());
+    for name in ["Minimum Phase", "Matched Phase", "Linear Phase"] {
+        assert!(ElementHandle::find_by_accessible_label(&ui, name).next().is_some(), "{name}");
+    }
+    let first = ElementHandle::find_by_accessible_label(&ui, "Minimum Phase").next().unwrap();
+    first.scroll(0.0, -1000.0);
+    i_slint_backend_testing::mock_elapsed_time(std::time::Duration::from_millis(250));
+    let last = ElementHandle::find_by_accessible_label(&ui, "Zero Phase (Beta)").next().unwrap();
+    let close = element(&ui, "Close", AccessibleRole::Button);
+    assert!(last.absolute_position().y + last.size().height < close.absolute_position().y);
+    assert!(close.absolute_position().y + close.size().height <= 384.0);
+
+    key(&ui, Key::Escape);
+    assert!(ElementHandle::find_by_accessible_label(&ui, "EQ phase modes").next().is_none());
+    element(&ui, "About EQ phase modes", AccessibleRole::Button).invoke_accessible_default_action();
+    element(&ui, "Close", AccessibleRole::Button).invoke_accessible_default_action();
+    assert_eq!(element(&ui, "EQ phase mode", AccessibleRole::Combobox).accessible_value().unwrap(), "Matched Phase");
+}
+
+#[test]
 fn widget_accent_follows_the_app_when_the_desktop_reports_a_different_color() {
     use slint::private_unstable_api::re_exports::{ChangeTracker, WindowInner};
 

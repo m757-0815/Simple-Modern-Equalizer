@@ -445,15 +445,17 @@ fn update_controls(ui: &MainWindow, app: &App) {
 }
 
 fn update_phase_setting(ui: &MainWindow, app: &App) {
-    let mode = app.preferences.phase_mode;
-    ui.set_phase_mode_index(mode.index());
-    let detail = if mode == phase::Mode::Matched {
-        let delay = matched::latency_ms(app.fit_rate());
-        format!("Adds about {delay:.1} ms of EQ buffering.")
-    } else {
-        mode.delay_budget_ms().map(|delay| format!("Adds up to {delay} ms of EQ buffering.")).unwrap_or_default()
-    };
-    ui.set_phase_mode_detail(detail.into());
+    let rate = app.fit_rate();
+    let details = phase::Mode::OPTIONS.map(|mode| {
+        if mode == phase::Mode::Matched {
+            let delay = matched::latency_ms(rate);
+            format!("Adds about {delay:.1} ms of EQ buffering.")
+        } else {
+            mode.delay_budget_ms().map(|delay| format!("Adds up to {delay} ms of EQ buffering.")).unwrap_or_default()
+        }
+    });
+    ui.set_phase_mode_details(text_model(details));
+    ui.set_phase_mode_index(app.preferences.phase_mode.index());
 }
 
 fn refresh_band_rows(ui: &MainWindow, cfg: &Config) {
