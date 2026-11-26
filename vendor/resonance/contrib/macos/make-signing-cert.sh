@@ -20,6 +20,11 @@
 #   contrib/macos/make-signing-cert.sh
 # then build the app signed with it:
 #   SIGN_IDENTITY="Resonance Local Signing" contrib/macos/build-app.sh
+
+#######################################################
+# create a local signing certificate for macOS testing
+#######################################################
+
 set -euo pipefail
 
 IDENTITY="${IDENTITY:-Resonance Local Signing}"

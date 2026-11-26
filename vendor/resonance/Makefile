@@ -1,3 +1,7 @@
+#######################################################
+# expose the workspace build and check commands
+#######################################################
+
 .PHONY: check fmt fmt-fix clippy test build clean e2e
 
 check: fmt clippy test

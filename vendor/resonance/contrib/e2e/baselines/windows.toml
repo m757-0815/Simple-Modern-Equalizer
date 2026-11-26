@@ -1,4 +1,9 @@
 # Added latency (ms) per scenario. Rewritten by `cargo xtask e2e --update-baseline`.
+
+#######################################################
+# record latency baselines for the Windows audio scenarios
+#######################################################
+
 "apo-all-types@48000x2" = 0.04
 "convolution@48000x2" = 5.56
 "flat@192000x8" = 0.0

@@ -11,6 +11,10 @@ use crate::ui::kit;
 use eframe::egui;
 use resonance_ipc::{AppStream, Command, DaemonState};
 
+// #######################################################
+// draw per-app volume and mute controls
+// #######################################################
+
 /// Volume slider range: 0–100 % (the conventional full-at-unity look). Boost
 /// (>100 %, supported on Linux/macOS) is set via the CLI for now and still shows
 /// here as a boost-green percentage with the slider pegged full.

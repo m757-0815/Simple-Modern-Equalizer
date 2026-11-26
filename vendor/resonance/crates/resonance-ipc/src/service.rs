@@ -10,6 +10,10 @@
 //! `status()`, `install()`, `uninstall()`, `start()`, `stop()`, `restart()`,
 //! `enable()`, `disable()`, and the helper booleans `is_installed/active/enabled`.
 
+// #######################################################
+// dispatch daemon service operations by platform
+// #######################################################
+
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]

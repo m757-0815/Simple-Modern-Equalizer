@@ -2,6 +2,11 @@
 # 'resonance' is already taken on the AUR (an unrelated GTK4 music player),
 # so this package is named 'resonance-eq'. The installed binaries keep their
 # plain names (resonanced, resonance, resonance-tui, resonance-gui).
+
+#######################################################
+# build Resonance from source for Arch Linux
+#######################################################
+
 pkgname=resonance-eq
 pkgver=0.9.2
 pkgrel=1

@@ -138,7 +138,9 @@ pub fn hit(area: Rect, col: u16, row: u16) -> bool {
     col >= area.x && col < area.x + area.width && row >= area.y && row < area.y + area.height
 }
 
-// ── EQ-graph geometry (for keyboard/mouse node editing) ──────────────────────
+// #######################################################
+// EQ-graph geometry (for keyboard/mouse node editing)
+// #######################################################
 
 /// Half-range of the EQ-curve dB axis. Must match `ui::DB_RANGE` (the Chart's
 /// y bounds are ±this), so pixel↔gain mapping lines up with the rendered curve.

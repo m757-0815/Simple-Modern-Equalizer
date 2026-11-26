@@ -13,7 +13,9 @@ use crate::ui::icons::{self, Icon};
 use crate::ui::widgets::lerp_color;
 use eframe::egui::{self, Color32};
 
-// ── Design tokens ────────────────────────────────────────────────────────────
+// #######################################################
+// Design tokens
+// #######################################################
 
 /// 4px spacing scale — every gap is one of these, nothing ad-hoc.
 pub(crate) const SP_XS: f32 = 4.0;
@@ -88,7 +90,9 @@ pub(crate) fn text_width(ui: &egui::Ui, size: f32, s: &str) -> f32 {
         .width()
 }
 
-// ── Primitives ────────────────────────────────────────────────────────────────
+// #######################################################
+// Primitives
+// #######################################################
 
 /// A section header: a small upper-case accent caption with a hairline rule
 /// filling the width beneath it. Consistent everywhere a group of controls
@@ -449,7 +453,9 @@ pub(crate) fn checkbox(ui: &mut egui::Ui, on: &mut bool, label: &str) -> bool {
     changed
 }
 
-// ── Pills (reference bar) ─────────────────────────────────────────────────────
+// #######################################################
+// Pills (reference bar)
+// #######################################################
 
 /// Fully-rounded pill height (mockup `.pill`).
 pub(crate) const PILL_H: f32 = 28.0;
@@ -1168,7 +1174,9 @@ pub(crate) fn tag_chip(
     resp
 }
 
-// ── Vector-icon controls ─────────────────────────────────────────────────────
+// #######################################################
+// Vector-icon controls
+// #######################################################
 
 /// Paint a square vector-icon button and return its raw response. Drawn as a real
 /// button — a resting `well` chip that brightens toward the accent on hover — so

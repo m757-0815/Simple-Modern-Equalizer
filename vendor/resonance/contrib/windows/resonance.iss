@@ -13,6 +13,10 @@
 #define AppPublisher "Resonance"
 #define AppExe "resonance-gui.exe"
 
+; #######################################################
+; package the Resonance Windows application and audio effect
+; #######################################################
+
 [Setup]
 AppId={{E3B7C2A1-9F4D-4C6E-8B2A-1D5F7A9C0E11}
 AppName={#AppName}

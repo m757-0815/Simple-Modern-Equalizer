@@ -5,6 +5,11 @@
   vmgui.py QMP_SOCK type 'some text'
   vmgui.py QMP_SOCK click X Y [N] [right]    (pixels of the 1920x1080 framebuffer)
 """
+
+#######################################################
+# operate the macOS test guest through its console
+#######################################################
+
 import json
 import os
 import socket

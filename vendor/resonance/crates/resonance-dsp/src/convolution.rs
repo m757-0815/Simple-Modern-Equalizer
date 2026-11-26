@@ -30,6 +30,10 @@ use rustfft::{Fft, FftPlanner};
 use std::collections::VecDeque;
 use std::sync::Arc;
 
+// #######################################################
+// apply a partitioned impulse response to streaming audio
+// #######################################################
+
 /// Input samples per partition. The engine buffers chain blocks to this
 /// boundary, so it is also the added latency in frames (~5.3 ms at 48 kHz —
 /// the same trade-off as the resampler's `CHUNK`).

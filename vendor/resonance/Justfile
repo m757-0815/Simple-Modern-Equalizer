@@ -1,3 +1,7 @@
+#######################################################
+# define local build and verification recipes
+#######################################################
+
 set shell := ["bash", "-c"]
 
 default: check

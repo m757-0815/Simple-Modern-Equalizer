@@ -1,3 +1,7 @@
+; #######################################################
+; export the entry points used to load the audio effect
+; #######################################################
+
 EXPORTS
     DllCanUnloadNow       PRIVATE
     DllGetClassObject     PRIVATE

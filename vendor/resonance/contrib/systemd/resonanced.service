@@ -1,3 +1,7 @@
+#######################################################
+# run the Resonance daemon as a user service
+#######################################################
+
 [Unit]
 Description=Resonance terminal EQ daemon (PipeWire)
 Documentation=https://github.com/ealtun21/resonance

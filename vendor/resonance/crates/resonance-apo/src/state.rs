@@ -45,7 +45,8 @@ pub const STATE_MAGIC: u32 = 0x4F50_4152;
 /// v10: (unused) the heartbeat landed after loudness removal, see v12.
 /// v11: − Loudness effect removed (buggy, redundant with Dynamic Boost).
 /// v12: + daemon liveness heartbeat (APO auto-bypass when stale).
-pub const STATE_VERSION: u32 = 13;
+/// v14: headphone room, output limiter, and gain-reduction telemetry.
+pub const STATE_VERSION: u32 = 14;
 
 /// `solo_band` sentinel meaning "no band soloed" (the field is a fixed `u32`, so
 /// `Option` is encoded as this reserved value rather than a niche).
@@ -112,6 +113,8 @@ pub struct ChainSnapshot {
     pub dynamic_boost: EffectSnapshot,
     pub bass: EffectSnapshot,
     pub crossfeed: EffectSnapshot,
+    pub room_amount: f64,
+    pub limiter_enabled: u32,
     pub num_filters: u32,
     /// Output dither target bit depth (`0` = off; else 16/20/24).
     pub dither_bits: u32,
@@ -153,6 +156,8 @@ impl Default for ChainSnapshot {
             dynamic_boost: EffectSnapshot::default(),
             bass: EffectSnapshot::default(),
             crossfeed: EffectSnapshot::default(),
+            room_amount: 0.0,
+            limiter_enabled: 0,
             num_filters: 0,
             dither_bits: 0,
             convolution_generation: 0,
@@ -232,6 +237,7 @@ pub struct Telemetry {
     /// Live interleaved channel count. Occupies the padding before updated_ms.
     pub channels: u32,
     pub updated_ms: u64,
+    pub limiter_reduction_db: f32,
 }
 
 /// Plain copy of telemetry returned to readers.
@@ -242,6 +248,7 @@ pub struct TelemetrySnapshot {
     pub in_rms: f32,
     pub out_rms: f32,
     pub stereo_rms: [f32; 2],
+    pub limiter_reduction_db: f32,
     pub sample_rate: f32,
     pub spectrum: [f32; TELEMETRY_BINS],
     pub channels: u32,
@@ -325,6 +332,8 @@ impl ChainSnapshot {
             dynamic_boost: effect(chain, FxEffect::DynamicBoost),
             bass: effect(chain, FxEffect::Bass),
             crossfeed: effect(chain, FxEffect::Crossfeed),
+            room_amount: chain.room.amount(),
+            limiter_enabled: u32::from(chain.limiter.enabled()),
             num_filters: n as u32,
             dither_bits: chain.dither.bits().unwrap_or(0),
             // The blob generation is owned by the SharedFile writer (it knows
@@ -411,6 +420,8 @@ impl ChainSnapshot {
         chain.set_effect_enabled(FxEffect::Bass, self.bass.enabled != 0);
         chain.set_effect_intensity(FxEffect::Crossfeed, self.crossfeed.intensity);
         chain.set_effect_enabled(FxEffect::Crossfeed, self.crossfeed.enabled != 0);
+        chain.room.set_amount(self.room_amount);
+        chain.limiter.set_enabled(self.limiter_enabled != 0);
         chain.set_dither((self.dither_bits != 0).then_some(self.dither_bits));
         // Transient audition: solo forces the IIR path in the chain, so it works
         // regardless of the phase mode armed above.
@@ -460,7 +471,7 @@ impl ChainSnapshot {
         if self.phase_mode != 0 || chain.phase_mode == resonance_dsp::chain::PhaseMode::Linear {
             return false;
         }
-        chain.enabled = self.enabled != 0;
+        chain.set_power(self.enabled != 0);
         chain.preamp_db = self.preamp_db;
         chain.set_effect_intensity(FxEffect::Fidelity, self.fidelity.intensity);
         chain.set_effect_enabled(FxEffect::Fidelity, self.fidelity.enabled != 0);
@@ -474,6 +485,8 @@ impl ChainSnapshot {
         chain.set_effect_enabled(FxEffect::Bass, self.bass.enabled != 0);
         chain.set_effect_intensity(FxEffect::Crossfeed, self.crossfeed.intensity);
         chain.set_effect_enabled(FxEffect::Crossfeed, self.crossfeed.enabled != 0);
+        chain.room.set_amount(self.room_amount);
+        chain.limiter.set_enabled(self.limiter_enabled != 0);
         chain.set_dither((self.dither_bits != 0).then_some(self.dither_bits));
         // Transient solo applies in place (a cheap flag; no filter-state reset,
         // so toggling an audition never clicks on the minimum-phase path).
@@ -819,7 +832,9 @@ impl SharedFile {
         unsafe { &mut *(self.mmap.as_ptr() as *mut SharedState) }
     }
 
-    // ---- chain snapshot: daemon writes, APO reads ----
+    // #######################################################
+    // chain snapshot: daemon writes, APO reads
+    // #######################################################
 
     /// Publish the daemon's current chain under the seqlock, syncing the IR
     /// sidecar blob first so the APO never sees a generation whose samples
@@ -910,7 +925,9 @@ impl SharedFile {
         None
     }
 
-    // ---- telemetry gate: daemon sets, APO reads ----
+    // #######################################################
+    // telemetry gate: daemon sets, APO reads
+    // #######################################################
 
     /// Daemon: enable/disable telemetry production (call only while a client is
     /// watching). When disabled the APO does no metering/FFT work.
@@ -926,7 +943,9 @@ impl SharedFile {
         self.state().telemetry_enabled.load(Ordering::Acquire) != 0
     }
 
-    // ---- telemetry: APO writes, daemon reads ----
+    // #######################################################
+    // telemetry: APO writes, daemon reads
+    // #######################################################
 
     /// APO worker thread: publish meters + spectrum under the telemetry seqlock.
     pub fn write_telemetry(&self, snapshot: TelemetrySnapshot) {
@@ -938,6 +957,7 @@ impl SharedFile {
         t.in_rms = snapshot.in_rms;
         t.out_rms = snapshot.out_rms;
         t.stereo_rms = snapshot.stereo_rms;
+        t.limiter_reduction_db = snapshot.limiter_reduction_db;
         t.sample_rate = snapshot.sample_rate;
         t.spectrum = snapshot.spectrum;
         t.channels = snapshot.channels;
@@ -960,6 +980,7 @@ impl SharedFile {
                 in_rms: t.in_rms,
                 out_rms: t.out_rms,
                 stereo_rms: t.stereo_rms,
+                limiter_reduction_db: t.limiter_reduction_db,
                 sample_rate: t.sample_rate,
                 spectrum: t.spectrum,
                 channels: t.channels,
@@ -977,7 +998,9 @@ impl SharedFile {
 /// Daemon-facing alias (the daemon historically referenced `ApoStateWriter`).
 pub type ApoStateWriter = SharedFile;
 
-// ── Fresh cross-process reads (Windows) ──────────────────────────────────────
+// #######################################################
+// Fresh cross-process reads (Windows)
+// #######################################################
 //
 // On Windows the daemon (session 1) and the APO (audiodg, LocalService, session
 // 0) live in different sessions. A long-lived memory-mapped *view* of the shared
@@ -1105,6 +1128,7 @@ pub fn read_telemetry_fresh(path: &Path) -> Option<TelemetrySnapshot> {
             in_rms: read_f32(&b, tel_off + std::mem::offset_of!(Telemetry, in_rms))?,
             out_rms: read_f32(&b, tel_off + std::mem::offset_of!(Telemetry, out_rms))?,
             stereo_rms: [read_f32(&b, stereo_off)?, read_f32(&b, stereo_off + 4)?],
+            limiter_reduction_db: read_f32(&b, tel_off + std::mem::offset_of!(Telemetry, limiter_reduction_db))?,
             sample_rate: read_f32(&b, tel_off + std::mem::offset_of!(Telemetry, sample_rate))?,
             spectrum,
             channels: read_u32(&b, tel_off + std::mem::offset_of!(Telemetry, channels))?,
@@ -1647,7 +1671,9 @@ mod tests {
         }
     }
 
-    // ── routing snapshot carry/gate (cross-platform; protects the Windows APO) ──
+    // #######################################################
+    // routing snapshot carry/gate (cross-platform; protects the Windows APO)
+    // #######################################################
 
     use resonance_dsp::channel::{ChannelMask, ChannelMatrix};
 
@@ -1717,7 +1743,9 @@ mod tests {
         assert!(route_matrix(17, &gains, 17).is_none(), "> MAX_ROUTE");
     }
 
-    // ── ChainSnapshot: masks, truncation, effects, apply_to ────────────────────
+    // #######################################################
+    // ChainSnapshot: masks, truncation, effects, apply_to
+    // #######################################################
 
     fn peaking(freq: f64, gain: f64, channels: usize, mask: ChannelMask) -> ApoFilter {
         ApoFilter::builder()
@@ -1828,7 +1856,9 @@ mod tests {
         assert_eq!(live.filters.len(), 2, "chain untouched on rebuild signal");
     }
 
-    // ── SharedFile + fresh-read seqlock / version guard ────────────────────────
+    // #######################################################
+    // SharedFile + fresh-read seqlock / version guard
+    // #######################################################
 
     fn patch_u32(path: &std::path::Path, offset: usize, val: u32) {
         let mut b = std::fs::read(path).unwrap();
@@ -1892,7 +1922,8 @@ mod tests {
         }
         w.write_telemetry(TelemetrySnapshot {
             in_peak: 0.8, out_peak: 0.6, in_rms: 0.3, out_rms: 0.25,
-            stereo_rms: [0.1, 0.3], sample_rate: 96000.0, spectrum, channels: 6, updated_ms: 123,
+            stereo_rms: [0.1, 0.3], limiter_reduction_db: 2.5,
+            sample_rate: 96000.0, spectrum, channels: 6, updated_ms: 123,
         });
 
         let via_map = w.read_telemetry().expect("mapped read");
@@ -1900,9 +1931,11 @@ mod tests {
         assert!((via_map.sample_rate - 96000.0).abs() < 1e-3);
         assert_eq!(via_map.spectrum, spectrum);
         assert_eq!(via_map.channels, 6);
+        assert_eq!(via_map.limiter_reduction_db, 2.5);
 
         let via_fresh = read_telemetry_fresh(&path).expect("fresh read");
         assert!((via_fresh.out_peak - 0.6).abs() < 1e-6);
+        assert_eq!(via_fresh.limiter_reduction_db, 2.5);
         assert_eq!(via_fresh.stereo_rms, [0.1, 0.3]);
         assert_eq!(via_fresh.updated_ms, 123);
         assert!((via_fresh.sample_rate - 96000.0).abs() < 1e-3);
@@ -1911,7 +1944,8 @@ mod tests {
         let legacy_end = 40 + TELEMETRY_BINS * std::mem::size_of::<f32>();
         assert_eq!(std::mem::offset_of!(Telemetry, channels), legacy_end - 4);
         assert_eq!(std::mem::offset_of!(Telemetry, updated_ms), legacy_end);
-        assert_eq!(std::mem::size_of::<Telemetry>(), legacy_end + 8);
+        assert_eq!(std::mem::offset_of!(Telemetry, limiter_reduction_db), legacy_end + 8);
+        assert_eq!(std::mem::size_of::<Telemetry>(), legacy_end + 16);
         std::fs::remove_file(&path).ok();
     }
 

@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+
+<!-- ####################################################### -->
+<!-- run the audio test agent in the macOS user session -->
+<!-- ####################################################### -->
+
 <plist version="1.0">
 <dict>
   <!-- The agent runs inside the logged-in session (audio and TCC only work there, not in

@@ -1491,7 +1491,9 @@ impl Paint {
     }
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+// #######################################################
+// Helpers
+// #######################################################
 
 /// Resolve a path against the *client's* working directory so the daemon — which
 /// runs from a different cwd (often `/` under systemd) — operates on the file the

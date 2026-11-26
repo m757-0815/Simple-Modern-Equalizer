@@ -15,6 +15,10 @@ pub const MAX_NAME_BYTES: usize = 160;
 pub const MIN_FREQUENCY: f64 = 20.0;
 pub const MAX_FREQUENCY: f64 = 20000.0;
 
+// #######################################################
+// define editable EQ settings and preset data
+// #######################################################
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Band {
@@ -100,6 +104,10 @@ impl Band {
             slope_db_oct: 12, scope: BandScope::Stereo, dynamics: None }
     }
 }
+
+// #######################################################
+// validate, edit, and convert EQ settings
+// #######################################################
 
 impl Config {
     pub fn flat_spline() -> Self {
@@ -252,6 +260,10 @@ impl Config {
         }
         true
     }
+
+    // #######################################################
+    // check preset values before using them
+    // #######################################################
 
     pub fn validate(&self) -> Result<(), String> {
         fn within(v: f64, lo: f64, hi: f64) -> bool { v.is_finite() && (lo..=hi).contains(&v) }
@@ -458,6 +470,10 @@ fn parametric_response(bands: &[Band], frequencies: impl IntoIterator<Item = f64
     let bands: Vec<_> = bands.iter().map(Band::state).collect();
     resonance_ipc::fr::response_for_frequencies(&bands, frequencies, sample_rate)
 }
+
+// #######################################################
+// evaluate the original EQ beneath the spline
+// #######################################################
 
 impl SplineSource {
     fn point_gains(&self, points: &[Band]) -> Vec<f64> {

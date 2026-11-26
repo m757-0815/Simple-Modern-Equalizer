@@ -9,6 +9,10 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
+// #######################################################
+// prepare a throwaway macOS test guest
+// #######################################################
+
 const NAME: &str = "e2e-macos";
 const USER: &str = "e2e";
 

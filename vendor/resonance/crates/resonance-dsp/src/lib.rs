@@ -1,3 +1,7 @@
+// #######################################################
+// expose the shared DSP modules
+// #######################################################
+
 pub mod analysis;
 pub mod chain;
 pub mod channel;
@@ -7,6 +11,8 @@ pub mod effects;
 pub mod filter;
 pub mod linphase;
 pub mod resample;
+pub mod true_peak;
+mod output_effects;
 
 #[cfg(test)]
 pub(crate) mod test_utils;

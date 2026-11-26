@@ -3,6 +3,10 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::sync::{Arc, Mutex};
 
+// #######################################################
+// play a raw reference signal in the Windows test guest
+// #######################################################
+
 fn main() {
     let path = std::env::args().nth(1).expect("in.raw");
     let bytes = std::fs::read(&path).expect("read");

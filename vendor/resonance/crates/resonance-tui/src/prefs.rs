@@ -2,6 +2,10 @@ use resonance_ipc::BandType;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+// #######################################################
+// store the terminal client's preferences
+// #######################################################
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Prefs {
     #[serde(default = "default_fps")]

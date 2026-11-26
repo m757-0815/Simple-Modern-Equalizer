@@ -1,7 +1,11 @@
-use crate::{BandRow, GraphDot, MainWindow, ToneClipping};
+use crate::{BandRow, FrequencyRegion, GraphDot, MainWindow, ToneClipping};
 use i_slint_backend_testing::{AccessibleRole, ElementHandle};
 use slint::{ComponentHandle, LogicalPosition, LogicalSize, Model, SharedString, VecModel, platform::{Key, PointerEventButton, WindowEvent}};
 use std::{cell::{Cell, RefCell}, rc::Rc};
+
+// #######################################################
+// start a test window without a desktop session
+// #######################################################
 
 fn window() -> MainWindow {
     i_slint_backend_testing::init_no_event_loop();
@@ -20,6 +24,10 @@ fn element(ui: &MainWindow, label: &str, role: AccessibleRole) -> ElementHandle 
 fn open_settings(ui: &MainWindow) {
     element(ui, "Settings", AccessibleRole::Button).invoke_accessible_default_action();
 }
+
+// #######################################################
+// check settings, phase selection, and display preferences
+// #######################################################
 
 #[test]
 fn playback_settings_offer_all_eq_phase_modes() {
@@ -40,6 +48,32 @@ fn playback_settings_offer_all_eq_phase_modes() {
     }
     key(&ui, Key::Return);
     assert_eq!(selected.get(), 3);
+}
+
+#[test]
+fn view_settings_select_the_eq_frequency_scale() {
+    let ui = window();
+    crate::update_eq_frequency_ticks(&ui);
+    let redraw = ui.as_weak();
+    ui.on_change_eq_frequency_scale(move || crate::update_eq_frequency_ticks(&redraw.unwrap()));
+    let saved = Rc::new(Cell::new(false));
+    let captured = saved.clone();
+    ui.on_save_graph_view(move || captured.set(true));
+    ui.show().unwrap();
+    open_settings(&ui);
+
+    let choice = element(&ui, "EQ frequency scale", AccessibleRole::Combobox);
+    assert_eq!(choice.accessible_value().unwrap(), "Logarithmic");
+    assert_eq!(ui.get_eq_frequency_ticks().row_data(2).unwrap().label, "1k");
+    choice.invoke_accessible_expand_action();
+    key(&ui, Key::DownArrow);
+    key(&ui, Key::Return);
+    assert!(saved.get());
+    assert_eq!(ui.get_eq_frequency_scale_index(), 1);
+    assert_eq!(choice.accessible_value().unwrap(), "Linear");
+    let middle_tick = ui.get_eq_frequency_ticks().row_data(2).unwrap();
+    assert_eq!(middle_tick.label, "10k");
+    assert!((middle_tick.position - 0.5).abs() < 0.001);
 }
 
 #[test]
@@ -174,7 +208,7 @@ fn applying_the_accent_updates_the_app_symbol_and_can_reset_it() {
 }
 
 #[test]
-fn about_opens_in_both_layouts_and_shows_the_license() {
+fn about_shows_the_developer_credit_and_license_in_both_layouts() {
     let ui = window();
     let license = include_str!("../LICENSE").trim();
     ui.set_license_text(license.into());
@@ -185,6 +219,7 @@ fn about_opens_in_both_layouts_and_shows_the_license() {
         ui.set_simple_layout(simple);
         open_settings(&ui);
         element(&ui, "About", AccessibleRole::Button).invoke_accessible_default_action();
+        assert!(ElementHandle::find_by_accessible_label(&ui, "Developed by Maximilian Hachen").next().is_some());
         element(&ui, "Read GPLv3", AccessibleRole::Button).invoke_accessible_default_action();
         let license_view = element(&ui, "GNU General Public License", AccessibleRole::TextInput);
         assert_eq!(license_view.accessible_value().unwrap(), license);
@@ -193,6 +228,10 @@ fn about_opens_in_both_layouts_and_shows_the_license() {
         assert!(ElementHandle::find_by_accessible_label(&ui, "Read GPLv3").next().is_none());
     }
 }
+
+// #######################################################
+// check tone control gestures and changes
+// #######################################################
 
 #[test]
 fn double_clicking_bass_resets_only_that_lever() {
@@ -299,7 +338,7 @@ fn band_toggle_does_not_submit_uncommitted_number_fields() {
     let capture = toggled.clone();
     ui.on_edit_band_enabled(move |index, enabled| capture.set(Some((index, enabled))));
     ui.show().unwrap();
-    ui.window().set_size(LogicalSize::new(1120.0, 1100.0));
+    ui.window().set_size(LogicalSize::new(1120.0, 1220.0));
 
     let frequency = element(&ui, "Band 1 frequency", AccessibleRole::TextInput);
     frequency.set_accessible_value("incomplete");
@@ -430,10 +469,15 @@ fn now_playing_shows_the_song_and_optional_artist_in_both_layouts() {
     assert!(ElementHandle::find_by_accessible_label(&ui, "An Example Song").next().is_some());
 }
 
+// #######################################################
+// check graph editing, deletion, and resizing
+// #######################################################
+
 #[test]
 fn graph_continues_dragging_the_renumbered_band() {
     let ui = window();
     ui.set_show_live_view(false);
+    ui.window().set_size(LogicalSize::new(1120.0, 1120.0));
     let bands = VecModel::from((0..3).map(|index| BandRow {
         frequency: format!("{}.0", 100 * (index + 1)).into(),
         gain_label: "+0.0 dB".into(),
@@ -586,6 +630,10 @@ fn shrinking_eq_from_its_bottom_edge_keeps_its_top_fixed_while_scrolled() {
     assert_eq!(grip.absolute_position().y, bottom.y - 70.0);
 }
 
+// #######################################################
+// check monitor choices and readings
+// #######################################################
+
 #[test]
 fn live_panel_selects_all_displays_and_visibility_stays_in_settings() {
     let ui = window();
@@ -597,21 +645,44 @@ fn live_panel_selects_all_displays_and_visibility_stays_in_settings() {
     let display = element(&ui, "Live display", AccessibleRole::Combobox);
     assert_eq!(display.accessible_value().unwrap(), "Bars");
     display.invoke_accessible_expand_action();
-    for (index, label) in ["Oscilloscope", "Stereo Level", "Before / After EQ", "Loudness History", "Stereo Field"].into_iter().enumerate() {
+    for (index, label) in ["Oscilloscope", "Stereo Level", "Before / After EQ", "Loudness History", "Stereo Field", "True Peak"].into_iter().enumerate() {
         key(&ui, Key::DownArrow);
         assert_eq!(ui.get_live_mode(), index as i32 + 1);
         assert_eq!(display.accessible_value().unwrap(), label);
     }
     key(&ui, Key::Return);
     ui.set_simple_layout(false);
-    assert_eq!(element(&ui, "Live display", AccessibleRole::Combobox).accessible_value().unwrap(), "Stereo Field");
+    assert_eq!(element(&ui, "Live display", AccessibleRole::Combobox).accessible_value().unwrap(), "True Peak");
     open_settings(&ui);
     let toggle = element(&ui, "Live Monitor", AccessibleRole::Checkbox);
     toggle.invoke_accessible_default_action();
     assert!(!ui.get_show_live_view());
     assert!(ElementHandle::find_by_accessible_label(&ui, "Live display").next().is_none());
     toggle.invoke_accessible_default_action();
-    assert_eq!(element(&ui, "Live display", AccessibleRole::Combobox).accessible_value().unwrap(), "Stereo Field");
+    assert_eq!(element(&ui, "Live display", AccessibleRole::Combobox).accessible_value().unwrap(), "True Peak");
+}
+
+#[test]
+fn true_peak_displays_overs_and_a_resettable_maximum() {
+    let ui = window();
+    ui.set_live_mode(crate::live::TRUE_PEAK_MODE);
+    ui.set_true_peak_left(1.2);
+    ui.set_true_peak_right(-3.6);
+    ui.set_true_peak_max_left(1.4);
+    ui.set_true_peak_max_right(-3.0);
+    let reset = Rc::new(Cell::new(false));
+    let reset_event = reset.clone();
+    ui.on_reset_true_peak(move || reset_event.set(true));
+    ui.show().unwrap();
+
+    for simple in [true, false] {
+        ui.set_simple_layout(simple);
+        for label in ["Left true peak: +1.2 dBTP", "Right true peak: -3.6 dBTP", "Max L +1.4  ·  R -3 dBTP"] {
+            assert!(ElementHandle::find_by_accessible_label(&ui, label).next().is_some(), "{label}");
+        }
+    }
+    element(&ui, "Reset true-peak hold", AccessibleRole::Button).invoke_accessible_default_action();
+    assert!(reset.get());
 }
 
 #[test]
@@ -633,6 +704,106 @@ fn stereo_level_displays_separate_channel_readings_in_both_layouts() {
     assert!(shows("Right level: −∞ dBFS"));
     ui.set_live_mode(0);
     assert!(!shows("Left level: -12 dBFS"));
+}
+
+#[test]
+fn advanced_effects_are_below_the_preamp_in_both_layouts() {
+    let ui = window();
+    ui.set_connected(true);
+    ui.set_crossfeed_available(true);
+    ui.set_room_available(true);
+    let changes = Rc::new(Cell::new(0));
+    let changes_seen = changes.clone();
+    ui.on_change_advanced_effects(move || changes_seen.set(changes_seen.get() + 1));
+    ui.show().unwrap();
+    assert!(!ui.get_show_advanced());
+    assert!(ElementHandle::find_by_element_id(&ui, "MainWindow::advanced-panel").next().is_none());
+    ui.set_show_advanced(true);
+
+    for simple in [true, false] {
+        ui.set_simple_layout(simple);
+        ui.window().dispatch_event(WindowEvent::PointerScrolled {
+            position: LogicalPosition::new(10.0, 560.0),
+            delta_x: 0.0,
+            delta_y: -300.0,
+        });
+        i_slint_backend_testing::mock_elapsed_time(std::time::Duration::from_millis(250));
+        let preamp = ElementHandle::find_by_element_id(&ui, "MainWindow::levels-panel").next().unwrap();
+        let advanced = ElementHandle::find_by_element_id(&ui, "MainWindow::advanced-panel").next().unwrap();
+        assert!(advanced.absolute_position().y >= preamp.absolute_position().y + preamp.size().height);
+        assert!(ElementHandle::find_by_accessible_label(&ui, "Advanced").next().is_some());
+        let crossfeed = element(&ui, "Headphone Crossfeed", AccessibleRole::Slider);
+        let room = element(&ui, "Room Amount", AccessibleRole::Slider);
+        let limiter = element(&ui, "Output Limiter", AccessibleRole::Checkbox);
+        assert_eq!(crossfeed.accessible_value().unwrap().parse::<f32>().unwrap(), 0.0);
+        assert_eq!(room.accessible_value().unwrap().parse::<f32>().unwrap(), 0.0);
+        assert_eq!(limiter.accessible_checked(), Some(false));
+        assert!(crossfeed.absolute_position().y < room.absolute_position().y);
+        assert!(room.absolute_position().y < limiter.absolute_position().y);
+    }
+
+    let crossfeed = element(&ui, "Headphone Crossfeed", AccessibleRole::Slider);
+    crossfeed.set_accessible_value("37");
+    let room = element(&ui, "Room Amount", AccessibleRole::Slider);
+    room.set_accessible_value("44");
+    element(&ui, "Output Limiter", AccessibleRole::Checkbox).invoke_accessible_default_action();
+    assert_eq!(changes.get(), 3);
+    assert_eq!(ui.get_crossfeed_percent(), 37.0);
+    assert_eq!(ui.get_room_percent(), 44.0);
+    assert!(ui.get_limiter_enabled());
+    ui.set_crossfeed_available(false);
+    ui.set_room_available(false);
+    assert_eq!(crossfeed.accessible_enabled(), Some(false));
+    assert_eq!(room.accessible_enabled(), Some(false));
+
+    ui.set_simple_layout(true);
+    open_settings(&ui);
+    let toggle = element(&ui, "Advanced", AccessibleRole::Checkbox);
+    assert_eq!(toggle.accessible_checked(), Some(true));
+    toggle.invoke_accessible_default_action();
+    assert!(!ui.get_show_advanced());
+    assert!(ElementHandle::find_by_element_id(&ui, "MainWindow::advanced-panel").next().is_none());
+    toggle.invoke_accessible_default_action();
+    assert!(ui.get_show_advanced());
+    assert_eq!(ui.get_crossfeed_percent(), 37.0);
+    assert_eq!(ui.get_room_percent(), 44.0);
+    assert!(ui.get_limiter_enabled());
+}
+
+#[test]
+fn limiter_overlay_marks_the_eq_graph_only_while_enabled() {
+    let ui = window();
+    ui.set_show_advanced(true);
+    ui.set_show_live_view(false);
+    ui.set_connected(true);
+    ui.window().set_size(LogicalSize::new(540.0, 1080.0));
+    ui.show().unwrap();
+
+    let limiter = element(&ui, "Output Limiter", AccessibleRole::Checkbox);
+    let show = element(&ui, "Show limiter on EQ graph", AccessibleRole::Checkbox);
+    assert!(show.absolute_position().x > limiter.absolute_position().x + limiter.size().width);
+    assert_eq!(show.accessible_enabled(), Some(false));
+    limiter.invoke_accessible_default_action();
+    assert_eq!(show.accessible_checked(), Some(false));
+
+    ui.set_limiter_graph_label("Limiter −3.0 dB".into());
+    ui.set_limiter_regions(Rc::new(VecModel::from(vec![FrequencyRegion { start: 0.5, end: 0.6 }])).into());
+    let band = || ElementHandle::find_by_element_id(&ui, "MainWindow::limiter-band").next();
+    assert!(band().is_none());
+    show.invoke_accessible_default_action();
+    assert!(ElementHandle::find_by_accessible_label(&ui, "Limiter −3.0 dB").next().is_some());
+    let plot = ElementHandle::find_by_element_id(&ui, "MainWindow::plot").next().unwrap();
+    assert!((band().unwrap().absolute_position().x - plot.absolute_position().x - plot.size().width * 0.5).abs() < 1.0);
+
+    ui.set_eq_frequency_scale_index(1);
+    let linear_position = crate::graph::FrequencyScale::Linear.x(20.0 * 1000.0_f64.sqrt()) as f32;
+    assert!((band().unwrap().absolute_position().x - plot.absolute_position().x - plot.size().width * linear_position).abs() < 1.0);
+
+    ui.set_bypass(true);
+    assert!(band().is_none());
+    ui.set_bypass(false);
+    show.invoke_accessible_default_action();
+    assert!(band().is_none());
 }
 
 #[test]
@@ -913,6 +1084,10 @@ fn standard_eq_monitor_shows_output_peak_and_clip_state() {
     assert!(!shows("CLIPPING"));
 }
 
+// #######################################################
+// check fullscreen and compact layouts
+// #######################################################
+
 #[test]
 fn escape_exits_full_screen_and_clears_the_settings_checkbox() {
     let ui = window();
@@ -1116,7 +1291,7 @@ fn narrow_layout_stacks_levels_and_parametric_band_controls() {
     ui.set_show_live_view(false);
     ui.set_bands(Rc::new(VecModel::from(vec![BandRow { frequency: "1000.0".into(), enabled: true,
         q: "0.7".into(), gain_label: "+0.0 dB".into(), ..BandRow::default() }])).into());
-    ui.window().set_size(LogicalSize::new(540.0, 960.0));
+    ui.window().set_size(LogicalSize::new(540.0, 1080.0));
     ui.show().unwrap();
 
     let frequency = element(&ui, "Band 1 frequency", AccessibleRole::TextInput);

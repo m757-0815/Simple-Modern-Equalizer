@@ -6,6 +6,10 @@ const DETAILED_BINS: usize = 512;
 const FFT_LENGTH: usize = 8192;
 const MIN_DB: f32 = -66.0;
 
+// #######################################################
+// choose the spectrum detail for each view
+// #######################################################
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Resolution {
     Standard,
@@ -35,6 +39,10 @@ impl Levels {
         &self.values[..self.resolution.bins()]
     }
 }
+
+// #######################################################
+// transform audio into logarithmic frequency bins
+// #######################################################
 
 pub struct Analyzer {
     fft: Arc<dyn Fft<f32>>,
@@ -112,6 +120,24 @@ impl Analyzer {
         Some(Levels { values, resolution })
     }
 
+    pub fn stereo_levels(
+        &mut self,
+        frames: impl Iterator<Item = [f32; 2]> + Clone,
+        rate: f64,
+        resolution: Resolution,
+    ) -> Option<Levels> {
+        // Analyze ears separately so out-of-phase signals still show up.
+        let mut samples: Vec<_> = frames.clone().map(|[left, _]| left).collect();
+        let mut levels = self.levels(&samples, rate, resolution)?;
+        samples.clear();
+        samples.extend(frames.map(|[_, right]| right));
+        let right = self.levels(&samples, rate, resolution)?;
+        for (combined, &level) in levels.values.iter_mut().zip(right.as_slice()) {
+            *combined = combined.max(level);
+        }
+        Some(levels)
+    }
+
     fn set_layout(&mut self, rate: f64, resolution: Resolution) {
         // Match the graph's logarithmic frequency axis while keeping narrow peaks visible.
         let count = resolution.bins();
@@ -137,9 +163,12 @@ impl Analyzer {
     }
 }
 
-/// Highlight nearby dominant bands from the output spectrum at a clip event.
-/// Digital clipping affects the full waveform, so this is an EQ tuning aid.
-pub fn clip_regions(levels: &[f32]) -> Vec<(f32, f32)> {
+// #######################################################
+// find prominent frequency ranges for the EQ overlays
+// #######################################################
+
+/// Group the strongest neighboring bands in a recent output spectrum.
+pub fn dominant_regions(levels: &[f32]) -> Vec<(f32, f32)> {
     let strongest = levels.iter().copied().fold(0.0, f32::max);
     if strongest < 0.25 { return Vec::new(); }
     let threshold = (strongest - 10.0 / -MIN_DB).max(0.25);
@@ -173,8 +202,20 @@ mod tests {
             let peak = levels.iter().enumerate().max_by(|a, b| a.1.total_cmp(b.1)).unwrap().0;
             let expected = ((1000.0_f64 / 20.0).log10() / 3.0 * count as f64).floor() as usize;
             assert!(peak.abs_diff(expected) <= 1);
-            assert_eq!(clip_regions(levels).len(), 1);
+            assert_eq!(dominant_regions(levels).len(), 1);
         }
-        assert!(clip_regions(&[0.0; STANDARD_BINS]).is_empty());
+        assert!(dominant_regions(&[0.0; STANDARD_BINS]).is_empty());
+    }
+
+    #[test]
+    fn stereo_overlay_finds_a_tone_that_cancels_in_the_mono_mix() {
+        let frames = (0..FFT_LENGTH).map(|index| {
+            let sample = (std::f32::consts::TAU * 1000.0 * index as f32 / 48_000.0).sin();
+            [sample, -sample]
+        });
+        let levels = Analyzer::default().stereo_levels(frames, 48_000.0, Resolution::Standard).unwrap();
+        let regions = dominant_regions(levels.as_slice());
+        let tone_position = (1000.0_f32 / 20.0).log10() / 3.0;
+        assert!(regions.iter().any(|&(start, end)| start <= tone_position && tone_position <= end));
     }
 }

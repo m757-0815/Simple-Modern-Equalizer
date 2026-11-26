@@ -6,5 +6,9 @@
 //! is decoupled from any UI framework via a [`download::Wake`] callback the
 //! client passes to wake its event loop when new data arrives.
 
+// #######################################################
+// share measurement and reference data between clients
+// #######################################################
+
 pub mod download;
 pub mod reference;

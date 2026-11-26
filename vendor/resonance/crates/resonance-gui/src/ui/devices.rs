@@ -73,7 +73,9 @@ struct ProfileRow<'a> {
 }
 
 impl GuiApp {
-    // ── Right column: devices → profiles + profile list ─────────────────────
+    // #######################################################
+    // Right column: devices → profiles + profile list
+    // #######################################################
 
     /// Right-aligned hint for the Profiles card head: "N saved", or "shown/N
     /// saved" when the filter is active.

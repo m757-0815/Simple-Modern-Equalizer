@@ -5,6 +5,10 @@
 use std::io;
 use std::path::PathBuf;
 
+// #######################################################
+// manage startup of the system tray client
+// #######################################################
+
 #[cfg(target_os = "linux")]
 mod imp {
     use super::{PathBuf, io};

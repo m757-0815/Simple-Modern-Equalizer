@@ -1,4 +1,9 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <!-- ####################################################### -->
+  <!-- declare the MSI package and upgrade behavior -->
+  <!-- ####################################################### -->
+
   <Package Name="Simple Modern Equalizer" Manufacturer="Simple Modern Equalizer" Version="$(var.ProductVersion)"
            UpgradeCode="{91D7BBBF-7046-44C3-8D01-2F8B1153D68E}" Scope="perMachine">
     <MediaTemplate EmbedCab="yes" />
@@ -12,6 +17,11 @@
     </Property>
     <Launch Condition="Installed OR WIX_UPGRADE_DETECTED OR NOT EXISTINGAUDIOENGINE"
             Message="Uninstall the existing Resonance audio engine before installing Simple Modern Equalizer." />
+
+    <!-- ####################################################### -->
+    <!-- install the app, daemon, and audio component -->
+    <!-- ####################################################### -->
+
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="SimpleDarkEQ">
         <Component Id="App" Guid="*">
@@ -40,6 +50,11 @@
         </Component>
       </Directory>
     </StandardDirectory>
+
+    <!-- ####################################################### -->
+    <!-- install the Start menu shortcut -->
+    <!-- ####################################################### -->
+
     <StandardDirectory Id="ProgramMenuFolder">
       <Component Id="AppShortcut" Guid="*">
         <Shortcut Id="LaunchEqualizer" Name="Simple Modern Equalizer" Target="[#MainExe]"
@@ -66,6 +81,11 @@
       Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[#UninstallApo]&quot;" />
     <SetProperty Id="RemoveApo" Before="RemoveApo" Sequence="execute"
       Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[#UninstallApo]&quot;" />
+
+    <!-- ####################################################### -->
+    <!-- register and remove the Windows audio effect with rollback -->
+    <!-- ####################################################### -->
+
     <CustomAction Id="RegisterApo" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)" DllEntry="WixQuietExec"
                   Execute="deferred" Impersonate="no" Return="check" />
     <CustomAction Id="RollbackApo" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)" DllEntry="WixQuietExec"

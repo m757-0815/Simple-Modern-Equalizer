@@ -10,6 +10,10 @@ use std::io;
 use std::path::PathBuf;
 use std::process::Command;
 
+// #######################################################
+// manage the daemon as a systemd user service
+// #######################################################
+
 pub const UNIT_NAME: &str = "resonanced.service";
 
 pub const UNAVAILABLE_MESSAGE: &str =

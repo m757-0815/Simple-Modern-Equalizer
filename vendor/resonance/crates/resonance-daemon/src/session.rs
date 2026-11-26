@@ -20,6 +20,10 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tracing::{info, warn};
 
+// #######################################################
+// recover the latest EQ session after a restart
+// #######################################################
+
 const VERSION: u32 = 1;
 const MAX_ATTEMPTS: u32 = 3;
 const STABLE_AFTER: Duration = Duration::from_secs(15);

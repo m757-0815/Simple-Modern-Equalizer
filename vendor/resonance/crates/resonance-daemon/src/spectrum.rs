@@ -2,6 +2,10 @@ use crate::state::{SPECTRUM_BINS, SharedState};
 use rustfft::{FftPlanner, num_complex::Complex};
 use std::time::Duration;
 
+// #######################################################
+// analyze live audio without blocking playback
+// #######################################################
+
 const FFT_SIZE: usize = 4096;
 const BINS: usize = SPECTRUM_BINS;
 // Matches the clients' log frequency axis (`resonance_ipc::fr::LOG_MIN`/`LOG_MAX`

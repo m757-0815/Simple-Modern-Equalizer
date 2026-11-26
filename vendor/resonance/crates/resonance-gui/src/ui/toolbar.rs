@@ -113,7 +113,9 @@ impl GuiApp {
         let daemon_inline = w >= req_daemon && service::manager_available();
         let history_inline = w >= req_history;
 
-        // ── Single controls row ────────────────────────────────────────────
+        // #######################################################
+        // Single controls row
+        // #######################################################
         // The brand/meters row was removed: the native OS title bar already names
         // the window (no CSD), so a second app-drawn "title bar" was redundant —
         // it read as two stacked title bars. Identity lives in the OS chrome;

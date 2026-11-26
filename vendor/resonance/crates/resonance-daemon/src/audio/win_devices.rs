@@ -87,7 +87,9 @@ fn enumerate() -> windows::core::Result<Vec<String>> {
     }
 }
 
-// ── Auto-match the virtual cable's sample rate to the real output ────────────
+// #######################################################
+// Auto-match the virtual cable's sample rate to the real output
+// #######################################################
 //
 // VB-CABLE's render (input) and capture (output) endpoints can be configured to
 // different shared-mode rates; when they differ, the cable resamples internally
@@ -119,7 +121,9 @@ unsafe trait IPolicyConfigVista: windows::core::IUnknown {
     ) -> HRESULT;
 }
 
-// ── Device selection (Windows control plane) ─────────────────────────────────
+// #######################################################
+// Device selection (Windows control plane)
+// #######################################################
 //
 // The daemon does no audio on Windows, but it still enumerates render endpoints
 // so clients can list/pick an output, and sets the system default playback

@@ -5,6 +5,10 @@ use resonance_dsp::analysis::{band_levels_db, fft_peak_hz};
 use rustfft::{FftPlanner, num_complex::Complex};
 use std::ops::Range;
 
+// #######################################################
+// check live results that can differ from the reference samples
+// #######################################################
+
 /// ±0.01 %: 1/6 of a cent. The 44.1↔48 kHz pitch bug is 8.8 %.
 pub const PITCH_TOLERANCE: f64 = 1e-4;
 pub const BAND_TOLERANCE_DB: f64 = 0.1;

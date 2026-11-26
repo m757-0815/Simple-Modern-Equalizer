@@ -4,6 +4,11 @@
 # the test curve gives ~11.7 dB, a bypassed chain ~0.
 #   lifecycle-probe.ps1 -Expect eq|flat [-Cli <resonance.exe>] [-Retries 3]
 # Prints one line `PROBE expect=.. verdict=.. spread=.. pitch_ok=..`, exits 1 on a mismatch.
+
+#######################################################
+# inspect installation and startup during lifecycle tests
+#######################################################
+
 param(
   [Parameter(Mandatory)][ValidateSet('eq', 'flat')][string]$Expect,
   [string]$Cli = 'C:\lc\resonance.exe',

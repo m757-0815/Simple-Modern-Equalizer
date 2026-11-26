@@ -3,6 +3,10 @@
 
 use std::path::PathBuf;
 
+// #######################################################
+// manage the daemon instance and cleanly stop it
+// #######################################################
+
 /// Unix socket path. Re-exported from `resonance_ipc::paths` so daemon and
 /// every client agree on the location.
 #[cfg(unix)]

@@ -90,7 +90,9 @@ pub fn read_response<R: Read>(reader: &mut R) -> Result<Response, TransportError
     read_msg(reader)
 }
 
-// ── Cross-platform client transport ──────────────────────────────────────────
+// #######################################################
+// Cross-platform client transport
+// #######################################################
 //
 // Linux/macOS use a Unix domain socket (filesystem path, per-user perms).
 // Windows has no usable AF_UNIX in std/tokio, so we use a loopback TCP socket

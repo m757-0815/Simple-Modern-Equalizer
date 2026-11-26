@@ -13,6 +13,10 @@ use resonance_ipc::{BandState, BandType};
 use resonance_reference::download::{DlCmd, ModelEntry, TargetEntry};
 use resonance_reference::reference::{Channel, ManageTab};
 
+// #######################################################
+// manage the graph reference and target curve
+// #######################################################
+
 /// The three logical sections of the reference bar, drawn left→right with a
 /// hairline between them.
 #[derive(Clone, Copy, PartialEq, Eq)]

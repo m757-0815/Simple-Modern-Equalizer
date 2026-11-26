@@ -28,7 +28,9 @@ fn peaking_band(freq: f64, gain_db: f64, channels: usize, mask: ChannelMask) -> 
         .unwrap()
 }
 
-// ── ChannelMask ─────────────────────────────────────────────────────────────
+// #######################################################
+// ChannelMask
+// #######################################################
 
 #[test]
 fn channel_mask_semantics() {
@@ -61,7 +63,9 @@ fn channel_mask_semantics() {
     assert!(ChannelMask::single(64).is_empty());
 }
 
-// ── ChannelMatrix ───────────────────────────────────────────────────────────
+// #######################################################
+// ChannelMatrix
+// #######################################################
 
 #[test]
 fn matrix_identity_is_passthrough() {
@@ -132,7 +136,9 @@ fn matrix_new_rejects_bad_dimensions() {
     assert!(ChannelMatrix::new(2, 0, vec![]).is_none());
 }
 
-// ── Per-channel EQ ──────────────────────────────────────────────────────────
+// #######################################################
+// Per-channel EQ
+// #######################################################
 
 #[test]
 fn per_channel_eq_isolates_to_masked_channel() {
@@ -173,7 +179,9 @@ fn per_channel_eq_isolates_to_masked_channel() {
     assert!(ch0_changed, "the masked channel 0 should be filtered");
 }
 
-// ── set_channels (device renegotiation) ─────────────────────────────────────
+// #######################################################
+// set_channels (device renegotiation)
+// #######################################################
 
 #[test]
 fn set_channels_resizes_and_passes_through() {
@@ -236,7 +244,9 @@ fn set_channels_is_noop_for_same_or_zero() {
     assert_eq!(chain.channels, 2);
 }
 
-// ── Effects across channel counts ───────────────────────────────────────────
+// #######################################################
+// Effects across channel counts
+// #######################################################
 
 #[test]
 fn effects_run_finite_for_various_channel_counts() {
@@ -304,7 +314,9 @@ fn surround_passthrough_unless_stereo() {
     assert_ne!(buf, input, "surround must alter a stereo signal");
 }
 
-// ── Chain routing integration ───────────────────────────────────────────────
+// #######################################################
+// Chain routing integration
+// #######################################################
 
 #[test]
 fn chain_route_none_is_copy() {
@@ -361,7 +373,9 @@ fn chain_route_identity_matrix_is_copy() {
     assert_eq!(out, processed);
 }
 
-// ── Per-channel EQ: frequency-response isolation ─────────────────────────────
+// #######################################################
+// Per-channel EQ: frequency-response isolation
+// #######################################################
 
 /// Steady-state gain (dB) of channel `ch` at `freq`, feeding the same tone on
 /// every channel through the chain. Measures the second half (post-settle).
@@ -465,7 +479,9 @@ fn masked_band_still_targets_channel_after_widen() {
     }
 }
 
-// ── ChannelMatrix edge cases ─────────────────────────────────────────────────
+// #######################################################
+// ChannelMatrix edge cases
+// #######################################################
 
 #[test]
 fn matrix_swap_edge_cases() {
@@ -523,7 +539,9 @@ fn out_channels_reflects_routing() {
     assert_eq!(chain.out_channels(), 2, "square swap → 2");
 }
 
-// ── reset clears running state ────────────────────────────────────────────────
+// #######################################################
+// reset clears running state
+// #######################################################
 
 #[test]
 fn reset_clears_effect_tail() {

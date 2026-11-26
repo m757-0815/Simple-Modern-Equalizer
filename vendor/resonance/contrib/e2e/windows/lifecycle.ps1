@@ -7,6 +7,11 @@
 # C:\lc\setup-old.exe and C:\lc\setup-new.exe (same binaries, two versions) and C:\lc\probe.ps1.
 # The daemon and clients are launched into the interactive session (session 1) through a /it
 # scheduled task, exactly as the Run key / the installer's "Launch" would. Exit code = failures.
+
+#######################################################
+# exercise the Windows installer and audio effect lifecycle
+#######################################################
+
 $ErrorActionPreference = 'Continue'
 $inst = 'C:\Program Files\Resonance'
 $cli = "$inst\resonance.exe"

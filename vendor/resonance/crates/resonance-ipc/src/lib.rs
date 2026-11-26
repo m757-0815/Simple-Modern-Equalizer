@@ -257,7 +257,9 @@ pub enum Command {
     FollowSystemOutput,
     /// Stop the daemon
     Shutdown,
-    // ── N-channel commands ───────────────────────────────────────────────────
+    // #######################################################
+    // N-channel commands
+    // #######################################################
     // IMPORTANT: keep these LAST. postcard encodes enum variants by ordinal with
     // no names, and the IPC wire is unversioned, so inserting a variant mid-enum
     // shifts every later variant's ordinal and silently misdecodes commands from
@@ -273,7 +275,9 @@ pub enum Command {
     SwapChannels { a: usize, b: usize },
     /// Clear routing: straight passthrough at the processing channel count.
     ClearRouting,
-    // ── Per-app commands (append-only, see the N-channel note above) ──────────
+    // #######################################################
+    // Per-app commands (append-only, see the N-channel note above)
+    // #######################################################
     /// Set a per-application stream's linear volume (0.0–4.0; 1.0 = unity,
     /// values above 1.0 = boost). Backends clamp to what they support (e.g.
     /// Windows caps at 1.0). `key` matches an `AppStream::key` from
@@ -336,6 +340,47 @@ pub enum Command {
     ResetAndExportChain { path: String },
     /// Capture synchronized front-channel audio around the processing chain.
     CaptureMonitor { frames: u16 },
+    /// Install a complete playback configuration as one transition on PipeWire.
+    /// The client sends a new impulse response when the graph rate changes.
+    ApplyPlayback {
+        preamp_db: f64,
+        enabled: bool,
+        bands: Vec<BandState>,
+        routing: Option<RoutingMatrix>,
+        convolution: Option<String>,
+    },
+    /// Read the accumulated post-EQ left/right true peaks and keep the meter active.
+    ReadTruePeak { reset: bool },
+    /// Install playback and its effects together during a PipeWire transition.
+    ApplyPlaybackWithEffects {
+        preamp_db: f64,
+        enabled: bool,
+        bands: Vec<BandState>,
+        routing: Option<RoutingMatrix>,
+        convolution: Option<String>,
+        effects: EffectsState,
+    },
+    /// Install the playback filters and output effects together on PipeWire.
+    ApplyAdvancedPlayback {
+        preamp_db: f64,
+        enabled: bool,
+        bands: Vec<BandState>,
+        routing: Option<RoutingMatrix>,
+        convolution: Option<String>,
+        effects: EffectsState,
+        output_effects: OutputEffects,
+    },
+    /// Adjust live room and limiter settings without replacing the filters.
+    SetOutputEffects(OutputEffects),
+    ReadLimiterReduction,
+    /// Replace the EQ and output effects together on the incremental backends.
+    ApplyStateWithOutputEffects {
+        preamp_db: f64,
+        enabled: bool,
+        bands: Vec<BandState>,
+        effects: EffectsState,
+        output_effects: OutputEffects,
+    },
 }
 
 /// Per-band audition mode (mirrors `resonance_dsp::chain::AuditionMode`).
@@ -640,6 +685,15 @@ pub enum Response {
     },
     /// Oldest first, with each frame ordered input L/R, output L/R.
     MonitorCapture { rate: u32, frames: Vec<[f32; 4]> },
+    /// Per-channel linear amplitudes since the last read. `None` means no fresh audio.
+    TruePeak { peaks: Option<[f32; 2]> },
+    LimiterReduction(f32),
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct OutputEffects {
+    pub room_amount: f64,
+    pub limiter_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1073,6 +1127,7 @@ mod tests {
         });
         command_round_trip(&Command::UnmapOutput);
         command_round_trip(&Command::ListMappings);
+        command_round_trip(&Command::ReadTruePeak { reset: true });
     }
 
     #[test]
@@ -1463,6 +1518,7 @@ mod tests {
                 rate: 48_000.0,
                 samples: vec![0.0, 0.5, -0.5],
             },
+            Response::TruePeak { peaks: Some([1.12, 0.76]) },
         ] {
             let bytes = to_stdvec(&r).expect("encode");
             let _: Response = from_bytes(&bytes).expect("decode");

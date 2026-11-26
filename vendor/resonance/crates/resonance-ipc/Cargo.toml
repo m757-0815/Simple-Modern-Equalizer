@@ -1,3 +1,7 @@
+#######################################################
+# build the shared daemon protocol and service helpers
+#######################################################
+
 [package]
 workspace = "../.."
 name = "resonance-ipc"

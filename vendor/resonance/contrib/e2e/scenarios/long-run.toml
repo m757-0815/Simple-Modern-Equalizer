@@ -1,3 +1,7 @@
+#######################################################
+# check the audio path over an extended run
+#######################################################
+
 [[scenario]]
 id = "long-flat"
 tier = "full"

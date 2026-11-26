@@ -22,6 +22,10 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::WindowId;
 
+// #######################################################
+// show the Windows and macOS tray menus
+// #######################################################
+
 /// Events pumped into the winit loop from the forwarder threads.
 enum UserEvent {
     /// A refreshed display model arrived from the poll thread.

@@ -9,6 +9,10 @@
 #include <string.h>
 #include <unistd.h>
 
+// #######################################################
+// inspect and select Core Audio devices for live tests
+// #######################################################
+
 static AudioObjectPropertyAddress addr(AudioObjectPropertySelector s, AudioObjectPropertyScope sc) {
     AudioObjectPropertyAddress a = {s, sc, kAudioObjectPropertyElementMain};
     return a;

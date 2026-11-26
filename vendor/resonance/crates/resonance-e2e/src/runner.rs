@@ -26,6 +26,10 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+// #######################################################
+// run each test against the daemon in its isolated session
+// #######################################################
+
 const OS: &str = "linux";
 const TRAINS: usize = 3;
 

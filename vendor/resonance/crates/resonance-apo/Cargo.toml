@@ -1,3 +1,7 @@
+#######################################################
+# build the Windows audio effect engine and its Rust library
+#######################################################
+
 [package]
 name = "resonance-apo"
 description = "DSP + control-bridge engine for the Windows APO (C ABI staticlib); shared state types"

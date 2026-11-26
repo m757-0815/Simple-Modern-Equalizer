@@ -5,6 +5,10 @@ use clap::Parser;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+// #######################################################
+// select and execute live audio scenarios
+// #######################################################
+
 #[derive(Parser)]
 #[command(about = "Resonance live-audio e2e agent (runs inside the e2e container/VM)")]
 enum Cli {

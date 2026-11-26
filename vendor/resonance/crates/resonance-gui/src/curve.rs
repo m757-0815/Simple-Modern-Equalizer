@@ -7,6 +7,10 @@ use resonance_ipc::BandState;
 // Re-export the shared evaluation core under the names the GUI already uses.
 pub use resonance_ipc::fr::{LOG_MAX, LOG_MIN, band_marker_x as clampf_log};
 
+// #######################################################
+// lay out the desktop EQ graph and frequency ticks
+// #######################################################
+
 /// Smallest (default) ± dB the FR graph shows; it auto-expands past this.
 pub const DB_RANGE: f64 = 18.0;
 /// Absolute cap the response is clamped to (and the largest the axis grows to).

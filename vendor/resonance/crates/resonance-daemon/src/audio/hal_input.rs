@@ -31,6 +31,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tracing::{info, warn};
 
+// #######################################################
+// capture audio from the macOS aggregate device
+// #######################################################
+
 /// Number of frames per `IOProc` callback we pre-allocate scratch for.
 /// Apple's tap typically delivers 512–1024 frames; we size generously.
 const MAX_FRAMES_PER_CYCLE: usize = 8192;

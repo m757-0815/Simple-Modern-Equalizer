@@ -1,3 +1,7 @@
+#######################################################
+# check what happens during live EQ changes
+#######################################################
+
 [[scenario]]
 id = "rate-change-48k-96k"
 tier = "quick"

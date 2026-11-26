@@ -1,6 +1,10 @@
-use crate::{config::Config, phase};
-use resonance_ipc::{Command, DaemonState, EffectsState, Response, RoutingMatrix, transport::SyncClient};
+use crate::{config::Config, phase, presets::Crossfeed};
+use resonance_ipc::{Command, DaemonState, EffectsState, FxEffectId, OutputEffects, Response, RoutingMatrix, transport::SyncClient};
 use std::{path::{Path, PathBuf}, process::{Child, Command as Process}, sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}}, thread, time::{Duration, Instant}};
+
+// #######################################################
+// share playback format and monitor readings with the UI
+// #######################################################
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct AudioFormat {
@@ -34,11 +38,37 @@ pub struct Shared {
     pub spectrum_levels: Option<Arc<crate::spectrum::Levels>>,
     pub monitor_mode: Option<i32>,
     pub monitor_signal: Option<Arc<crate::monitor::Signal>>,
+    pub true_peaks: Option<[f32; 2]>,
+    pub reset_true_peak: bool,
+    pub limiter_reduction_db: f32,
+    pub limiter_overlay_requested: bool,
+    pub limiter_hit: Option<LimiterHit>,
 }
 
+pub struct LimiterHit {
+    pub time: Instant,
+    pub reduction_db: f32,
+    pub regions: Vec<(f32, f32)>,
+}
+
+#[derive(Clone, Copy, Default, PartialEq)]
+pub struct PlaybackEffects {
+    pub crossfeed: Crossfeed,
+    pub output: OutputEffects,
+}
+
+#[derive(Default)]
 struct PlaybackSettings {
     config: Config,
     phase_mode: phase::Mode,
+    playback_effects: PlaybackEffects,
+}
+
+impl PlaybackSettings {
+    fn effects(&self) -> EffectsState {
+        let (crossfeed_intensity, crossfeed_enabled) = self.playback_effects.crossfeed.settings();
+        EffectsState { crossfeed_intensity, crossfeed_enabled, ..EffectsState::default() }
+    }
 }
 
 impl Shared {
@@ -69,6 +99,10 @@ pub fn balance_matrix(channels: usize, cfg: &Config) -> RoutingMatrix {
     for ch in 0..channels { gains[ch * channels + ch] = match ch { 0 => l, 1 => r, _ => 1.0 }; }
     RoutingMatrix { in_ch: channels, out_ch: channels, gains }
 }
+
+// #######################################################
+// turn EQ edits into engine commands
+// #######################################################
 
 fn update_plan(previous: Option<&Config>, cfg: &Config, channels: usize, sample_rate: f64) -> Result<Vec<Command>, String> {
     cfg.validate()?;
@@ -136,6 +170,10 @@ fn update_plan(previous: Option<&Config>, cfg: &Config, channels: usize, sample_
     Ok(commands)
 }
 
+// #######################################################
+// order filter and gain changes for playback
+// #######################################################
+
 fn playback_plan(
     previous: Option<&PlaybackSettings>,
     desired: &PlaybackSettings,
@@ -145,13 +183,35 @@ fn playback_plan(
     let before = previous.map(|settings| settings.phase_mode.biquad_config(&settings.config));
     let after = desired.phase_mode.biquad_config(&desired.config);
     let mut commands = update_plan(before.as_deref(), &after, format.channels, format.sample_rate)?;
+    if let Some(command) = commands.first_mut()
+        && let Command::ApplyState { preamp_db, enabled, bands, .. } = command
+    {
+        *command = Command::ApplyStateWithOutputEffects {
+            preamp_db: *preamp_db, enabled: *enabled, bands: std::mem::take(bands),
+            effects: desired.effects(), output_effects: desired.playback_effects.output,
+        };
+    } else if let Some(old) = previous {
+        let before = old.playback_effects;
+        let after = desired.playback_effects;
+        if before.crossfeed != after.crossfeed {
+            // Set the amount first so enabling crossfeed starts at the selected strength.
+            let (value, enabled) = after.crossfeed.settings();
+            commands.push(Command::SetEffectIntensity { effect: FxEffectId::Crossfeed, value });
+            if enabled != before.crossfeed.settings().1 {
+                commands.push(Command::SetEffectEnabled { effect: FxEffectId::Crossfeed, enabled });
+            }
+        }
+        if before.output != after.output {
+            commands.push(Command::SetOutputEffects(after.output));
+        }
+    }
     if let Some(convolution) = convolution {
         let mut deferred = Vec::new();
         // A full sync swaps the IIR bands. Keep the chain bypassed until its
         // convolution is in place, and raise preamp only after the IR change.
         commands.retain_mut(|command| {
             match command {
-                Command::ApplyState { enabled, .. } if *enabled => {
+                Command::ApplyStateWithOutputEffects { enabled, .. } if *enabled => {
                     *enabled = false;
                     deferred.push(Command::SetPower { enabled: true });
                 }
@@ -173,6 +233,33 @@ fn playback_plan(
     Ok(commands)
 }
 
+fn apply_playback(
+    settings: &PlaybackSettings,
+    format: &AudioFormat,
+    convolution: Option<String>,
+) -> Result<Command, String> {
+    if !(1..=64).contains(&format.channels) {
+        return Err("Unsupported audio channel count".into());
+    }
+    let cfg = settings.phase_mode.biquad_config(&settings.config);
+    let bands = cfg.parametric_bands()
+        .iter()
+        .filter(|band| band.frequency_hz < format.sample_rate / 2.0)
+        .map(|band| band.state())
+        .collect();
+    let routing = (format.channels > 1 && cfg.gains() != (1.0, 1.0))
+        .then(|| balance_matrix(format.channels, &cfg));
+    Ok(Command::ApplyAdvancedPlayback {
+        preamp_db: cfg.preamp_db,
+        enabled: !cfg.bypass,
+        bands,
+        routing,
+        convolution,
+        effects: settings.effects(),
+        output_effects: settings.playback_effects.output,
+    })
+}
+
 fn route(client: &mut SyncClient, output: Option<&str>) -> Result<Option<String>, String> {
     match client.send_recv(match output {
         Some(name) => Command::SetOutputTarget { node_name: name.into() },
@@ -183,6 +270,10 @@ fn route(client: &mut SyncClient, output: Option<&str>) -> Result<Option<String>
         _ => Err("Unexpected audio-engine reply".into()),
     }
 }
+
+// #######################################################
+// keep the audio engine connected and in sync
+// #######################################################
 
 impl Engine {
     #[cfg(test)]
@@ -229,9 +320,12 @@ impl Engine {
                 let session = (|| -> Result<(), String> {
                     // The app renders its buffered modes into one IR, including
                     // both the parametric and spline parts of the curve.
-                    request(&mut client, Command::ClearConvolutionIr)?;
-                    request(&mut client, Command::SetDither { bits: None })?;
-                    request(&mut client, Command::SetPhaseMode { linear: false })?;
+                    #[cfg(not(target_os = "linux"))]
+                    {
+                        request(&mut client, Command::ClearConvolutionIr)?;
+                        request(&mut client, Command::SetDither { bits: None })?;
+                        request(&mut client, Command::SetPhaseMode { linear: false })?;
+                    }
                     let mut applied: Option<(AudioFormat, Arc<PlaybackSettings>)> = None;
                     let mut installed_filter: Option<phase::Filter> = None;
                     let mut last_filter_edit = None::<Instant>;
@@ -241,6 +335,9 @@ impl Engine {
                     let mut analyzer = crate::spectrum::Analyzer::default();
                     let mut previous_resolution = None;
                     let mut next_analysis = Instant::now();
+                    let mut next_limiter_analysis = next_analysis;
+                    #[cfg(target_os = "linux")]
+                    let mut next_limiter_capture = next_analysis;
                     let mut previous_monitor_mode = None;
                     let mut next_monitor_poll = Instant::now();
                     let mut next_poll = Instant::now();
@@ -262,12 +359,33 @@ impl Engine {
                             }
                         }
                         let snapshot = client.get_state().map_err(|e| e.to_string())?;
-                        let (scope_requested, spectrum_requested, meter_capture_requested, monitor_mode) = {
-                            let shared = state.lock().unwrap();
-                            (shared.scope_requested, shared.spectrum_requested, shared.meter_capture_requested, shared.monitor_mode)
+                        let format = AudioFormat::from(&snapshot);
+                        let (scope_requested, spectrum_requested, meter_capture_requested, monitor_mode, reset_peak_request,
+                             prepared, limiter_overlay_requested) = {
+                            let mut shared = state.lock().unwrap();
+                            (shared.scope_requested, shared.spectrum_requested, shared.meter_capture_requested,
+                             shared.monitor_mode, std::mem::take(&mut shared.reset_true_peak),
+                             shared.prepared_for(&format), shared.limiter_overlay_requested)
                         };
+                        let watch_limiter = prepared.as_ref().is_some_and(|settings| {
+                            settings.playback_effects.output.limiter_enabled && !settings.config.bypass
+                        });
+                        let reduction = if watch_limiter {
+                            match client.send_recv(Command::ReadLimiterReduction) {
+                                Ok(Response::LimiterReduction(db)) => db,
+                                _ => 0.0,
+                            }
+                        } else { 0.0 };
+                        let limiter_overlay = watch_limiter && limiter_overlay_requested;
                         let stereo_requested = cfg!(windows) && monitor_mode == Some(crate::live::STEREO_FIELD_MODE);
+                        let peak_requested = monitor_mode == Some(crate::live::TRUE_PEAK_MODE);
+                        let peak_was_requested = previous_monitor_mode == Some(crate::live::TRUE_PEAK_MODE);
+                        let reset_peak = reset_peak_request || !peak_was_requested;
                         let now = Instant::now();
+                        let analyze_limiter = limiter_overlay && reduction >= 0.05 && now >= next_limiter_analysis;
+                        if analyze_limiter {
+                            next_limiter_analysis = now + Duration::from_millis(64);
+                        }
                         let analyze = spectrum_requested != previous_resolution
                             || (spectrum_requested.is_some() && now >= next_analysis);
                         if analyze {
@@ -282,18 +400,70 @@ impl Engine {
                         } else {
                             0
                         };
+                        let stereo_frames = if cfg!(windows) && analyze_limiter {
+                            crate::scope::CAPTURE_FRAMES as usize
+                        } else if stereo_requested {
+                            crate::monitor::FIELD_FRAMES
+                        } else { 0 };
                         let audio = capture.read(
                             &mut client, &snapshot,
-                            frames > 0 || meter_capture_requested || stereo_requested,
+                            frames > 0 || meter_capture_requested || stereo_requested
+                                || (cfg!(windows) && (peak_requested || limiter_overlay)),
                             frames,
-                            stereo_requested,
+                            stereo_frames,
                         );
                         let waveform = audio.as_ref().filter(|_| scope_requested)
                             .map(|audio| Arc::from(crate::scope::window(&audio.samples, audio.rate)));
                         let spectrum = audio.as_ref().filter(|_| analyze).zip(spectrum_requested)
                             .map(|(audio, resolution)| analyzer.levels(&audio.samples, audio.rate, resolution)
                                 .unwrap_or_else(|| crate::spectrum::Levels::silent(resolution)));
-                        let format = AudioFormat::from(&snapshot);
+                        #[cfg(target_os = "linux")]
+                        let limiter_capture = if limiter_overlay && (analyze_limiter || now >= next_limiter_capture) {
+                            next_limiter_capture = now + Duration::from_millis(120);
+                            // Keep recent stereo history available and fetch samples only on a hit.
+                            let frames = if analyze_limiter { crate::scope::CAPTURE_FRAMES as u16 } else { 0 };
+                            match client.send_recv(Command::CaptureMonitor { frames }) {
+                                Ok(Response::MonitorCapture { rate, frames }) if f64::from(rate) == format.sample_rate => {
+                                    Some((rate, frames))
+                                }
+                                _ => None,
+                            }
+                        } else { None };
+                        let limiter_hit = if analyze_limiter {
+                            let resolution = spectrum_requested.unwrap_or(crate::spectrum::Resolution::Standard);
+                            #[cfg(target_os = "linux")]
+                            let levels = limiter_capture.as_ref().and_then(|(rate, frames)| {
+                                analyzer.stereo_levels(frames.iter().map(|&[_, _, left, right]| [left, right]),
+                                    f64::from(*rate), resolution)
+                            });
+                            #[cfg(windows)]
+                            let levels = audio.as_ref().and_then(|audio| {
+                                analyzer.stereo_levels(audio.stereo.iter().copied(), audio.rate, resolution)
+                            });
+                            #[cfg(not(any(target_os = "linux", windows)))]
+                            let levels = analyzer.levels(&[], format.sample_rate, resolution);
+                            // A stopped stream can leave a gain-reduction reading behind.
+                            // Only refresh the highlight when its audio history is current.
+                            levels.map(|levels| LimiterHit {
+                                time: now,
+                                reduction_db: reduction,
+                                regions: crate::spectrum::dominant_regions(levels.as_slice()),
+                            })
+                        } else { None };
+                        // Read the peaks from PipeWire on Linux and WASAPI loopback on Windows.
+                        #[cfg(target_os = "linux")]
+                        let true_peaks = if peak_requested {
+                            match client.send_recv(Command::ReadTruePeak { reset: reset_peak }) {
+                                Ok(Response::TruePeak { peaks }) => peaks,
+                                _ => None,
+                            }
+                        } else { None };
+                        #[cfg(windows)]
+                        let true_peaks = if peak_requested || peak_was_requested {
+                            capture.true_peak(peak_requested, reset_peak)
+                        } else { None };
+                        #[cfg(not(any(target_os = "linux", windows)))]
+                        let true_peaks: Option<[f32; 2]> = None;
                         let monitor_changed = monitor_mode != previous_monitor_mode;
                         let refresh_monitor = monitor_changed || (monitor_mode.is_some() && Instant::now() >= next_monitor_poll);
                         let monitor_signal = if refresh_monitor {
@@ -310,9 +480,12 @@ impl Engine {
                             previous_monitor_mode = monitor_mode;
                             #[cfg(windows)]
                             { audio.as_ref().filter(|_| stereo_requested)
-                                .map(|audio| crate::monitor::Signal::stereo(audio.stereo.clone())) }
+                                .map(|audio| {
+                                    let start = audio.stereo.len().saturating_sub(crate::monitor::FIELD_FRAMES);
+                                    crate::monitor::Signal::stereo(audio.stereo[start..].to_vec())
+                                }) }
                             #[cfg(target_os = "linux")]
-                            { monitor_mode.and_then(|mode| {
+                            { monitor_mode.filter(|&mode| mode != crate::live::TRUE_PEAK_MODE).and_then(|mode| {
                                 if snapshot.meters.in_peak.max(snapshot.meters.out_peak) <= 0.00001 {
                                     return None;
                                 }
@@ -335,7 +508,7 @@ impl Engine {
                         } else {
                             None
                         };
-                        let prepared = {
+                        {
                             let mut s = state.lock().unwrap();
                             s.clipped |= snapshot.meters.clip || snapshot.meters.out_peak >= 1.0;
                             #[cfg(windows)]
@@ -348,8 +521,21 @@ impl Engine {
                             if refresh_monitor {
                                 s.monitor_signal = monitor_signal.map(Arc::new);
                             }
-                            s.prepared_for(&format)
-                        };
+                            if !peak_requested || reset_peak {
+                                s.true_peaks = None;
+                            }
+                            // Keep the highest unread peaks in case the UI skips a refresh.
+                            if let Some(peaks) = true_peaks.filter(|_| s.monitor_mode == Some(crate::live::TRUE_PEAK_MODE) && !s.reset_true_peak) {
+                                let unread = s.true_peaks.get_or_insert([0.0; 2]);
+                                for (peak, next) in unread.iter_mut().zip(peaks) {
+                                    *peak = peak.max(next);
+                                }
+                            }
+                            s.limiter_reduction_db = reduction;
+                            if limiter_hit.is_some() && s.limiter_overlay_requested {
+                                s.limiter_hit = limiter_hit;
+                            }
+                        }
                         let status = if let Some(settings) = prepared {
                             let previous = applied.as_ref().filter(|(on, _)| *on == format)
                                 .map(|(_, settings)| settings);
@@ -363,17 +549,22 @@ impl Engine {
                                 let should_wait = filter_changed && same_mode_and_rate
                                     && last_filter_edit.is_some_and(|last| last.elapsed() < Duration::from_millis(80));
                                 if !should_wait {
-                                    let convolution = if filter_changed {
-                                        Some(match &filter {
-                                            Some(filter) => {
-                                                crate::storage::write_text(&ir_path, &filter.wav()?)
-                                                    .map_err(|error| format!("Could not save EQ filter: {error}"))?;
-                                                Command::SetConvolutionIr { path: ir_path.to_string_lossy().into_owned() }
-                                            }
+                                    let path = filter.as_ref().map(|_| ir_path.to_string_lossy().into_owned());
+                                    if let Some(filter) = filter.as_ref().filter(|_| filter_changed) {
+                                        crate::storage::write_text(&ir_path, &filter.wav()?)
+                                            .map_err(|error| format!("Could not save EQ filter: {error}"))?;
+                                    }
+                                    // Send the filter, gain, and routing together for a Linux playback transition.
+                                    let commands = if cfg!(target_os = "linux") && (previous.is_none() || filter_changed) {
+                                        vec![apply_playback(&settings, &format, path)?]
+                                    } else {
+                                        let convolution = filter_changed.then(|| match path {
+                                            Some(path) => Command::SetConvolutionIr { path },
                                             None => Command::ClearConvolutionIr,
-                                        })
-                                    } else { None };
-                                    for command in playback_plan(previous.map(Arc::as_ref), &settings, &format, convolution)? {
+                                        });
+                                        playback_plan(previous.map(Arc::as_ref), &settings, &format, convolution)?
+                                    };
+                                    for command in commands {
                                         if !alive.load(Ordering::Relaxed) { return Ok(()); }
                                         request(&mut client, command)?;
                                     }
@@ -391,7 +582,8 @@ impl Engine {
                             applied = None;
                             "Preparing settings for output…"
                         };
-                        state.lock().unwrap().status = route_error.as_ref().map_or_else(|| status.into(), |error| format!("Output switch: {error}"));
+                        state.lock().unwrap().status = route_error.as_ref()
+                            .map_or_else(|| status.into(), |error| format!("Output switch: {error}"));
                         // Keep the cadence across small timer delays and skip missed ticks.
                         let now = Instant::now();
                         let interval = if scope_requested || meter_capture_requested || monitor_mode == Some(crate::live::STEREO_FIELD_MODE) {
@@ -407,6 +599,8 @@ impl Engine {
                     let mut s = state.lock().unwrap(); s.state = None; s.scope_samples = None;
                     s.spectrum_levels = None;
                     s.monitor_signal = None;
+                    s.true_peaks = None;
+                    s.limiter_hit = None;
                     s.status = format!("Audio connection: {e}");
                     drop(s); thread::sleep(Duration::from_millis(750));
                 }
@@ -434,9 +628,9 @@ impl Engine {
         Self { shared, running, worker: Some(worker) }
     }
 
-    pub fn submit(&self, format: &AudioFormat, config: Config, phase_mode: phase::Mode) {
+    pub fn submit(&self, format: &AudioFormat, config: Config, phase_mode: phase::Mode, playback_effects: PlaybackEffects) {
         let mut shared = self.shared.lock().unwrap();
-        shared.prepared = Some((format.clone(), Arc::new(PlaybackSettings { config, phase_mode })));
+        shared.prepared = Some((format.clone(), Arc::new(PlaybackSettings { config, phase_mode, playback_effects })));
     }
 }
 
@@ -446,6 +640,10 @@ impl Drop for Engine {
         if let Some(worker) = self.worker.take() { let _ = worker.join(); }
     }
 }
+
+// #######################################################
+// start the bundled audio daemon
+// #######################################################
 
 fn spawn_engine() -> std::io::Result<Child> {
     let dir: PathBuf = std::env::current_exe()?.parent().unwrap().into();
@@ -556,9 +754,7 @@ mod tests {
     fn a_prepared_preset_is_scoped_to_the_output_and_audio_format() {
         let old = AudioFormat { channels: 2, sample_rate: 48000.0, output: Some("USB DAC".into()) };
         let mut state = Shared {
-            prepared: Some((old.clone(), Arc::new(PlaybackSettings {
-                config: Config::default(), phase_mode: phase::Mode::Minimum,
-            }))),
+            prepared: Some((old.clone(), Arc::new(PlaybackSettings::default()))),
             ..Shared::default()
         };
         let new = AudioFormat { output: Some("Speakers".into()), ..old.clone() };
@@ -567,6 +763,7 @@ mod tests {
         assert!(state.prepared_for(&other_rate).is_none());
         let new_cfg = Arc::new(PlaybackSettings {
             config: Config { preamp_db: -6.0, ..Config::default() }, phase_mode: phase::Mode::Zero,
+            ..PlaybackSettings::default()
         });
         state.prepared = Some((new.clone(), new_cfg.clone()));
         assert!(Arc::ptr_eq(&state.prepared_for(&new).unwrap(), &new_cfg));
@@ -578,28 +775,59 @@ mod tests {
         let format = AudioFormat { channels: 2, sample_rate: 48000.0, output: None };
         let mut cfg = Config::default();
         cfg.bands[0].gain_db = 6.0;
-        let minimum = PlaybackSettings { config: cfg.clone(), phase_mode: phase::Mode::Minimum };
-        let matched = PlaybackSettings { config: cfg.clone(), phase_mode: phase::Mode::Matched };
-        let zero = PlaybackSettings { config: cfg.clone(), phase_mode: phase::Mode::Zero };
+        let minimum = PlaybackSettings { config: cfg.clone(), ..PlaybackSettings::default() };
+        let matched = PlaybackSettings { config: cfg.clone(), phase_mode: phase::Mode::Matched, ..PlaybackSettings::default() };
+        let zero = PlaybackSettings { config: cfg.clone(), phase_mode: phase::Mode::Zero, ..PlaybackSettings::default() };
         let load = Command::SetConvolutionIr { path: "live-eq.wav".into() };
         let matched_commands = playback_plan(Some(&minimum), &matched, &format, Some(load.clone())).unwrap();
         assert!(matches!(matched_commands.as_slice(), [Command::SetConvolutionIr { .. }]));
         let commands = playback_plan(Some(&minimum), &zero, &format, Some(load)).unwrap();
         assert!(matches!(commands.as_slice(), [
-            Command::ApplyState { enabled: false, bands, .. }, Command::ClearRouting,
+            Command::ApplyStateWithOutputEffects { enabled: false, bands, .. }, Command::ClearRouting,
             Command::SetConvolutionIr { .. }, Command::SetPower { enabled: true },
         ] if bands.is_empty()));
 
         let commands = playback_plan(Some(&zero), &minimum, &format, Some(Command::ClearConvolutionIr)).unwrap();
         assert!(matches!(commands.as_slice(), [
-            Command::ApplyState { enabled: false, bands, .. }, Command::ClearRouting,
+            Command::ApplyStateWithOutputEffects { enabled: false, bands, .. }, Command::ClearRouting,
             Command::ClearConvolutionIr, Command::SetPower { enabled: true },
         ] if bands.len() == cfg.bands.len()));
 
         cfg.bypass = true;
-        let bypass = PlaybackSettings { config: cfg, phase_mode: phase::Mode::Zero };
+        let bypass = PlaybackSettings { config: cfg, phase_mode: phase::Mode::Zero, ..PlaybackSettings::default() };
         assert!(matches!(playback_plan(Some(&zero), &bypass, &format, Some(Command::ClearConvolutionIr)).unwrap().as_slice(),
             [Command::SetPower { enabled: false }, Command::ClearConvolutionIr]));
+    }
+
+    #[test]
+    fn advanced_effects_survive_full_updates_and_change_without_replacing_the_filter() {
+        let format = AudioFormat { channels: 2, sample_rate: 48_000.0, output: Some("Headphones".into()) };
+        let off = PlaybackSettings::default();
+        let output = OutputEffects { room_amount: 0.44, limiter_enabled: true };
+        let high = PlaybackSettings {
+            playback_effects: PlaybackEffects { crossfeed: Crossfeed::new(100), output },
+            ..PlaybackSettings::default()
+        };
+        let load = apply_playback(&high, &format, Some("spline.wav".into())).unwrap();
+        assert!(matches!(load, Command::ApplyAdvancedPlayback { effects, output_effects, convolution: Some(_), .. }
+            if output_effects == output && effects.get(FxEffectId::Crossfeed) == (1.0, true)));
+        let full = playback_plan(None, &high, &format, None).unwrap();
+        assert!(matches!(&full[0], Command::ApplyStateWithOutputEffects { effects, output_effects, .. }
+            if *output_effects == output && effects.get(FxEffectId::Crossfeed) == (1.0, true)));
+        let live = playback_plan(Some(&off), &high, &format, None).unwrap();
+        assert!(matches!(live.as_slice(), [
+            Command::SetEffectIntensity { effect: FxEffectId::Crossfeed, value: 1.0 },
+            Command::SetEffectEnabled { effect: FxEffectId::Crossfeed, enabled: true },
+            Command::SetOutputEffects(installed),
+        ] if *installed == output));
+        let level = PlaybackSettings {
+            playback_effects: PlaybackEffects { crossfeed: Crossfeed::new(37), output },
+            ..PlaybackSettings::default()
+        };
+        let adjusted = playback_plan(Some(&high), &level, &format, None).unwrap();
+        assert!(matches!(adjusted.as_slice(), [
+            Command::SetEffectIntensity { effect: FxEffectId::Crossfeed, value: 0.37 },
+        ]));
     }
 
     #[test]

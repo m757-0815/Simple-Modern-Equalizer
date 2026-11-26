@@ -7,6 +7,10 @@ use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
+// #######################################################
+// prepare the macOS test devices and daemon
+// #######################################################
+
 pub const DAEMON_LABEL: &str = "e2e.resonanced";
 pub const DAEMON_LOG: &str = "/tmp/e2e-daemon.log";
 

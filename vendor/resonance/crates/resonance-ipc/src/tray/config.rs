@@ -1,6 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+// #######################################################
+// save tray behavior and launch preferences
+// #######################################################
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum LeftClick {

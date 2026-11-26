@@ -110,6 +110,8 @@ pub struct ProcessorChain {
     pub dynamic_boost: DynamicBoostEffect,
     pub bass: BassBoostEffect,
     pub crossfeed: CrossfeedEffect,
+    pub room: crate::output_effects::Room,
+    pub limiter: crate::output_effects::Limiter,
     /// Final-stage TPDF dither (off by default → bit-exact).
     pub dither: DitherStage,
     /// Optional output remap applied *after* EQ + effects, mapping the `channels`
@@ -134,6 +136,15 @@ impl ProcessorChain {
     #[must_use]
     pub fn builder() -> ProcessorChainBuilder {
         ProcessorChainBuilder::default()
+    }
+
+    pub fn set_power(&mut self, enabled: bool) {
+        if self.enabled && !enabled {
+            // Delay lines should never replay their old samples after bypass.
+            self.room.reset();
+            self.limiter.reset();
+        }
+        self.enabled = enabled;
     }
 
     /// Process an interleaved buffer of f64 samples in place.
@@ -363,9 +374,10 @@ impl ProcessorChain {
         self.surround.process(buf, channels);
         self.dynamic_boost.process(buf, channels);
         self.bass.process(buf, channels);
-        // Crossfeed narrows the final stereo image, so it runs last — after every
-        // other effect (including Surround, which widens it) has shaped the sound.
+        // Shape the stereo image before adding the room reflections.
         self.crossfeed.process(buf, channels);
+        self.room.process(buf, channels);
+        self.limiter.process(buf, channels);
         // Dither is the very last stage, right before the output truncation.
         self.dither.apply(buf, channels);
     }
@@ -478,7 +490,18 @@ impl ProcessorChain {
         self.dynamic_boost.reset();
         self.bass.reset();
         self.crossfeed.reset();
+        self.room.reset();
+        self.limiter.reset();
         self.dither.reset();
+    }
+
+    fn rebind_output_effects(&mut self, channels: usize, rate: f64) {
+        let room = self.room.amount();
+        let limiter = self.limiter.enabled();
+        self.room = crate::output_effects::Room::new(rate);
+        self.limiter = crate::output_effects::Limiter::new(channels, rate);
+        self.room.set_amount(room);
+        self.limiter.set_enabled(limiter);
     }
 
     /// Rebind every sample-rate-dependent coefficient to a new output rate.
@@ -518,6 +541,7 @@ impl ProcessorChain {
             carry_settings(&self.dynamic_boost, DynamicBoostEffect::new(sample_rate));
         self.bass = carry_settings(&self.bass, BassBoostEffect::new(ch, sample_rate));
         self.crossfeed = carry_settings(&self.crossfeed, CrossfeedEffect::new(ch, sample_rate));
+        self.rebind_output_effects(ch, sample_rate);
     }
 
     /// Rebind every channel-count-dependent buffer to a new processing channel
@@ -545,6 +569,7 @@ impl ProcessorChain {
         self.dynamic_boost = carry_settings(&self.dynamic_boost, DynamicBoostEffect::new(sr));
         self.bass = carry_settings(&self.bass, BassBoostEffect::new(channels, sr));
         self.crossfeed = carry_settings(&self.crossfeed, CrossfeedEffect::new(channels, sr));
+        self.rebind_output_effects(channels, sr);
         self.dither.set_channels(channels);
     }
 
@@ -682,6 +707,8 @@ impl ProcessorChainBuilder {
             dynamic_boost: DynamicBoostEffect::new(sr),
             bass: BassBoostEffect::new(channels, sr),
             crossfeed: CrossfeedEffect::new(channels, sr),
+            room: crate::output_effects::Room::new(sr),
+            limiter: crate::output_effects::Limiter::new(channels, sr),
             dither: DitherStage::new(channels),
             routing: None,
             audition: None,
@@ -1088,7 +1115,9 @@ mod tests {
         assert_eq!(buf, input);
     }
 
-    // ── Mid/side band scope ─────────────────────────────────────────────────
+    // #######################################################
+    // Mid/side band scope
+    // #######################################################
 
     fn ms_chain(scope: crate::filter::BandScope) -> ProcessorChain {
         use crate::filter::{ApoFilter, FilterType};
@@ -1211,7 +1240,9 @@ mod tests {
         );
     }
 
-    // ── Dynamic EQ in the chain ─────────────────────────────────────────────
+    // #######################################################
+    // Dynamic EQ in the chain
+    // #######################################################
 
     /// A 1 kHz Peaking band (gain 0) with a −6 dB dynamics cut engaging at
     /// −25 dBFS, plus the given scope/mask.
@@ -1365,7 +1396,9 @@ mod tests {
         }
     }
 
-    // ── Linear-phase mode ───────────────────────────────────────────────────
+    // #######################################################
+    // Linear-phase mode
+    // #######################################################
 
     /// Build a stereo chain with the given bands, render + load the FIR and
     /// switch to Linear.
@@ -1531,7 +1564,9 @@ mod tests {
         assert_eq!(chain.eq_fir_latency_frames(), 0);
     }
 
-    // ── Click-free phase-mode transitions ───────────────────────────────────
+    // #######################################################
+    // Click-free phase-mode transitions
+    // #######################################################
 
     /// Feed a continuous low-frequency sine block-by-block, flipping something
     /// mid-stream; the largest sample-to-sample step in the output bounds the

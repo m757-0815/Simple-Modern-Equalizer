@@ -6,6 +6,10 @@ use crate::ratechain::{By, RateChain, Resampling};
 use serde::Serialize;
 use std::fmt::Write as _;
 
+// #######################################################
+// summarize scenario measurements and results
+// #######################################################
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Status {

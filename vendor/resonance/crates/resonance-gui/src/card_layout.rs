@@ -3,6 +3,10 @@
 
 use serde::{Deserialize, Serialize};
 
+// #######################################################
+// save where the desktop control panels are placed
+// #######################################################
+
 /// The movable control cards. The graph and EQ Bands are fixed anchors and are
 /// deliberately absent here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

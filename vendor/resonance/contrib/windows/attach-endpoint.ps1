@@ -6,6 +6,11 @@
 # and does NOT restart audiosrv — a brand-new endpoint's audiodg graph is built
 # on its first stream, so writing the FX slot beforehand is picked up with no
 # restart (no audio blip for everyone else on a BT connect).
+
+#######################################################
+# register the audio effect on the selected Windows endpoint
+#######################################################
+
 [CmdletBinding()]
 param([string] $EndpointGuid = $env:RESONANCE_ATTACH_GUID)
 $ErrorActionPreference = 'Continue'

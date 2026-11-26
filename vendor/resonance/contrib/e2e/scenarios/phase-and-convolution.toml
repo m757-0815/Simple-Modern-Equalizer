@@ -1,3 +1,7 @@
+#######################################################
+# check phase transitions and impulse response playback
+#######################################################
+
 [[scenario]]
 id = "linear-phase"
 tier = "full"

@@ -6,6 +6,10 @@ use resonance_ipc::transport::SyncClient;
 use resonance_ipc::{Command, DaemonState, Response};
 use std::time::Duration;
 
+// #######################################################
+// send tray commands to the running daemon
+// #######################################################
+
 const IPC_TIMEOUT: Duration = Duration::from_millis(400);
 
 fn client() -> Option<SyncClient> {

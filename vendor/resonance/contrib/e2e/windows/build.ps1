@@ -1,3 +1,7 @@
+#######################################################
+# build the audio engine and test agent in the Windows guest
+#######################################################
+
 $ErrorActionPreference = 'Continue'
 $env:Path = "C:\Users\Quickemu\.cargo\bin;$env:USERPROFILE\.cargo\bin;C:\Windows\System32\config\systemprofile\.cargo\bin;" + $env:Path
 Set-Location C:\src

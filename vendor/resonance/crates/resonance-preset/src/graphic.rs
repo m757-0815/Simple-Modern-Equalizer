@@ -194,7 +194,9 @@ pub fn fit_graphic_eq(points: &[(f64, f64)]) -> (f64, Vec<EqBand>) {
     (((preamp * 10.0).round()) / 10.0, bands)
 }
 
-// ── Seeding ──────────────────────────────────────────────────────────────────
+// #######################################################
+// Seeding
+// #######################################################
 
 /// Build an initial guess: a low-/high-shelf + preamp fitted linearly to the
 /// broad shape, then `n_peaks` peaking filters placed greedily at the largest
@@ -272,7 +274,9 @@ fn seed(freqs: &[f64], target: &[f64], n_peaks: usize) -> (f64, Vec<Filt>) {
     (preamp, filts)
 }
 
-// ── Levenberg–Marquardt ────────────────────────────────────────────────────
+// #######################################################
+// Levenberg–Marquardt
+// #######################################################
 
 /// Pack the free parameters into a flat vector: `[preamp, (log10 fc, gain[, log10
 /// q])…]`. Shelves contribute fc+gain (Q fixed); peaks contribute fc+gain+q.
@@ -428,7 +432,9 @@ fn lm_optimize(
     (preamp, filts, rms)
 }
 
-// ── Biquad response helpers ──────────────────────────────────────────────────
+// #######################################################
+// Biquad response helpers
+// #######################################################
 
 fn coeffs_of(f: &Filt) -> Option<BiquadCoeffs> {
     match f.kind {

@@ -1,3 +1,7 @@
+#######################################################
+# register the equalizer with desktop launchers
+#######################################################
+
 [Desktop Entry]
 Name=Simple Modern Equalizer
 Comment=System-wide audio equalizer

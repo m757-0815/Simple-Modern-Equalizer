@@ -12,6 +12,10 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
+// #######################################################
+// play and capture test audio from the same process clock
+// #######################################################
+
 /// Recording starts this long before playback, so the first stimulus frame is
 /// never missed; the compare step searches the alignment.
 const PRE_ROLL: Duration = Duration::from_millis(300);

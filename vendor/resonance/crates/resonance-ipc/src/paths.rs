@@ -15,6 +15,10 @@
 
 use std::path::PathBuf;
 
+// #######################################################
+// locate presets, profiles, and runtime files on each platform
+// #######################################################
+
 #[cfg(windows)]
 fn home() -> PathBuf {
     if let Ok(p) = std::env::var("USERPROFILE") {

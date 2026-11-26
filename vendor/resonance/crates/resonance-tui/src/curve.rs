@@ -7,6 +7,10 @@ use resonance_ipc::BandState;
 // Re-export the shared band-marker helper under the name the TUI already uses.
 pub use resonance_ipc::fr::band_marker_x;
 
+// #######################################################
+// map EQ responses and points to the terminal graph
+// #######################################################
+
 /// TUI clamps the displayed curve to ±18 dB (its graph never auto-expands).
 const TUI_CLAMP_DB: f64 = 18.0;
 

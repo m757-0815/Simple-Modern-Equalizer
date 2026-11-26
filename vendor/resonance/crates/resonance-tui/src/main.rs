@@ -155,7 +155,9 @@ fn handle_normal(app: &mut App, key: KeyEvent) {
         KeyCode::Char('p') => app.toggle_power(),
         KeyCode::Char('l') => app.begin_load_preset(),
         KeyCode::Char('s') => app.begin_settings(),
-        // ── Graph panel: arrows drag the selected node in 2 axes ──
+        // #######################################################
+        // Graph panel: arrows drag the selected node in 2 axes
+        // #######################################################
         KeyCode::Up if app.focus == app::Panel::Graph => {
             app.graph_nudge(if shift { 1.0 } else { 0.5 }, 0.0);
         }
@@ -170,7 +172,9 @@ fn handle_normal(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Char('[') if app.focus == app::Panel::Graph => app.graph_select(-1),
         KeyCode::Char(']') if app.focus == app::Panel::Graph => app.graph_select(1),
-        // ── Effects / Bands: select + adjust active field ──
+        // #######################################################
+        // Effects / Bands: select + adjust active field
+        // #######################################################
         KeyCode::Up => app.cursor_up(),
         KeyCode::Down => app.cursor_down(),
         KeyCode::Right => app.adjust(if shift { 0.10 } else { 0.05 }),

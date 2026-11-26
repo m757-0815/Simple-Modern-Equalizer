@@ -8,6 +8,10 @@ use windows::{
     Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize, RoUninitialize},
 };
 
+// #######################################################
+// manage the COM apartment for media queries
+// #######################################################
+
 struct Apartment;
 
 impl Drop for Apartment {
@@ -16,6 +20,10 @@ impl Drop for Apartment {
         unsafe { RoUninitialize() };
     }
 }
+
+// #######################################################
+// read the current Windows media session
+// #######################################################
 
 pub(super) struct Source {
     manager: Option<Manager>,

@@ -6,6 +6,10 @@ use resonance_ipc::BandType;
 use resonance_preset::{apo::parse_apo, fac::parse_fac};
 use std::path::{Path, PathBuf};
 
+// #######################################################
+// browse files and preview presets before loading them
+// #######################################################
+
 pub struct Item {
     pub name: String,
     pub path: PathBuf,

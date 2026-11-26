@@ -1,3 +1,7 @@
+#######################################################
+# install the Windows guest's build and test tools
+#######################################################
+
 $ProgressPreference = 'SilentlyContinue'
 Set-Location C:\
 curl.exe -sL -o C:\vs_BuildTools.exe https://aka.ms/vs/17/release/vs_BuildTools.exe

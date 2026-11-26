@@ -54,7 +54,9 @@ pub fn stereo_sine(freq_hz: f64, sample_rate: f64, frames: usize, amplitude: f64
         .collect()
 }
 
-// ── Rate-conversion test harness (items 14/15) ─────────────────────────────────
+// #######################################################
+// Rate-conversion test harness (items 14/15)
+// #######################################################
 
 /// Extract one channel from an interleaved buffer.
 pub fn channel(interleaved: &[f64], channels: usize, ch: usize) -> Vec<f64> {

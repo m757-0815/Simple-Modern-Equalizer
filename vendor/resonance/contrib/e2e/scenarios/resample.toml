@@ -1,3 +1,7 @@
+#######################################################
+# check rate conversion within the live audio path
+#######################################################
+
 [[scenario]]
 id = "headset-16k-mono"
 tier = "full"

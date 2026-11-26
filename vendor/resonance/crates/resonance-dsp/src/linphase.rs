@@ -13,6 +13,10 @@ use rustfft::FftPlanner;
 use rustfft::num_complex::Complex;
 use std::f64::consts::PI;
 
+// #######################################################
+// synthesize linear-phase filters from static EQ bands
+// #######################################################
+
 /// Base FFT grid length at rates ≤ 48 kHz (~2.9 Hz resolution). Doubles per
 /// rate octave so the low-frequency resolution is rate-independent.
 const BASE_GRID: usize = 16_384;

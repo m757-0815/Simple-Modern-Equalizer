@@ -1,5 +1,9 @@
 use serde::{Deserialize, Deserializer, Serialize};
 
+// #######################################################
+// set the plot colors and default accent
+// #######################################################
+
 // These neutrals match the Slint surfaces and dividers.
 pub const PLOT_BACKGROUND: [u8; 3] = [21, 24, 29];
 pub const PLOT_GRID: [u8; 3] = [45, 49, 57];
@@ -42,6 +46,10 @@ impl<'de> Deserialize<'de> for ThemeColors {
         Ok(Self { accent })
     }
 }
+
+// #######################################################
+// derive widget and graph colors from the accent
+// #######################################################
 
 impl ThemeColors {
     pub fn parse(value: &str) -> Result<Self, String> {

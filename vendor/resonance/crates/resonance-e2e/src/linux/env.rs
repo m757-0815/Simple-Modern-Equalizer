@@ -8,6 +8,10 @@ use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+// #######################################################
+// prepare the private PipeWire test session
+// #######################################################
+
 pub const DEVICE: &str = "e2e_dev";
 pub const DEVICE2: &str = "e2e_dev2";
 /// The daemon's routable null sink (`audio/pipewire.rs` `create_null_sink`).

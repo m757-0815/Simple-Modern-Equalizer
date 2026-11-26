@@ -9,6 +9,10 @@
 
 use libfuzzer_sys::fuzz_target;
 
+// #######################################################
+// exercise the FxSound parser with arbitrary input
+// #######################################################
+
 fuzz_target!(|data: &[u8]| {
     let text = String::from_utf8_lossy(data);
     let _ = resonance_preset::fac::parse_fac(&text);

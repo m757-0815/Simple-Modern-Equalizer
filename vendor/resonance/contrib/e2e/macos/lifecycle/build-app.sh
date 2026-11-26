@@ -1,6 +1,11 @@
 #!/bin/bash
 # Guest side: release-build the full app bundle with the product's own build-app.sh, signed with the
 # image's stable identity, into ~/build/Resonance.app (nothing is installed yet). Log: ~/build-app.log.
+
+#######################################################
+# build the macOS app for the lifecycle tests
+#######################################################
+
 set -eu
 export PATH="$HOME/.cargo/bin:$PATH"
 K=$HOME/Library/Keychains/resonance-signing.keychain-db

@@ -1,4 +1,9 @@
 # Added latency (ms) per scenario. Rewritten by `cargo xtask e2e --update-baseline`.
+
+#######################################################
+# record latency baselines for the Linux audio scenarios
+#######################################################
+
 "apo-all-types@48000x2" = -21.31
 "convolution@48000x2" = -13.4
 "convolution@96000x2" = -17.35

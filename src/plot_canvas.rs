@@ -2,6 +2,10 @@ use crate::theme::PLOT_BACKGROUND;
 use slint::{Rgba8Pixel, SharedPixelBuffer};
 use tiny_skia::{Color, FillRule, LineCap, LineJoin, Paint, Path, PathBuilder, PixmapMut, Rect, Stroke, Transform};
 
+// #######################################################
+// size plot buffers for the display scale
+// #######################################################
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RasterSize {
     pub width: u32,
@@ -24,6 +28,10 @@ impl RasterSize {
         })
     }
 }
+
+// #######################################################
+// draw charts in their logical coordinate space
+// #######################################################
 
 pub struct Canvas {
     pixels: SharedPixelBuffer<Rgba8Pixel>,
@@ -75,6 +83,10 @@ impl Canvas {
         self.pixels
     }
 }
+
+// #######################################################
+// render the app icon with the selected accent
+// #######################################################
 
 pub fn app_icon(accent: [u8; 3]) -> slint::Image {
     let mut canvas = Canvas::new(64, 64, RasterSize { width: 128, height: 128 });

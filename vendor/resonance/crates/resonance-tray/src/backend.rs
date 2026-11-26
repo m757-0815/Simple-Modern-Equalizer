@@ -5,6 +5,10 @@
 use crate::menu::{MenuAction, MenuModel};
 use std::sync::mpsc::{Receiver, Sender};
 
+// #######################################################
+// choose the tray implementation for the platform
+// #######################################################
+
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 mod desktop;
 #[cfg(target_os = "linux")]

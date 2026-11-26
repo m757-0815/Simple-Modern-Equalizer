@@ -1,3 +1,7 @@
+#######################################################
+# build and archive the Windows installer
+#######################################################
+
 name: windows-installer
 
 # Tags and manual runs only: the local Windows VM (e2e.yml) builds, lints and

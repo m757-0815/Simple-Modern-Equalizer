@@ -13,6 +13,10 @@ use super::{systemd, xdg_autostart};
 use std::io;
 use std::path::PathBuf;
 
+// #######################################################
+// select the Linux user service implementation
+// #######################################################
+
 /// Display name; the active sub-backend uses its own unit/desktop name.
 pub const UNIT_NAME: &str = "resonanced";
 

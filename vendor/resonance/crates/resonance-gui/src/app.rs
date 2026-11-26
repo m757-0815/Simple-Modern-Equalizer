@@ -964,7 +964,9 @@ impl GuiApp {
         ctx.set_visuals(theme.visuals());
     }
 
-    // ── Undo / redo ─────────────────────────────────────────────────────────
+    // #######################################################
+    // Undo / redo
+    // #######################################################
 
     fn snapshot(&self) -> Option<Snapshot> {
         let s = self.state.as_ref()?;
@@ -1028,7 +1030,9 @@ impl GuiApp {
         });
     }
 
-    // ── Connection / polling ────────────────────────────────────────────────
+    // #######################################################
+    // Connection / polling
+    // #######################################################
 
     /// Copy the IPC worker's latest snapshot into our fields (called once per
     /// frame). The UI thread never does IPC, so this never blocks.
@@ -1580,7 +1584,9 @@ impl GuiApp {
     }
 }
 
-// ── UI sections ─────────────────────────────────────────────────────────────
+// #######################################################
+// UI sections
+// #######################################################
 
 impl GuiApp {
     /// Whether a pane is currently shown (not in the hidden set).

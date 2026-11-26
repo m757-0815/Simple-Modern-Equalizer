@@ -3,6 +3,11 @@
 # then ISCC. Log: C:\lc-build.log (ends with "LC BUILD DONE"). Outputs, all in C:\lc:
 #   setup-old.exe / setup-new.exe   same binaries, versions $ver.0 and $ver.1 (upgrade test)
 #   resonance.exe, probe.ps1        the CLI and lifecycle-probe.ps1, independent of the install
+
+#######################################################
+# build the installer and tools for the Windows lifecycle tests
+#######################################################
+
 $ErrorActionPreference = 'Continue'
 $env:Path = "C:\Windows\System32\config\systemprofile\.cargo\bin;C:\Users\Quickemu\.cargo\bin;" + $env:Path
 $env:CARGO_TERM_COLOR = 'never'; $env:CARGO_INCREMENTAL = '0'

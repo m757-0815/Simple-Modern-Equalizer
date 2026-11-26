@@ -11,6 +11,10 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+// #######################################################
+// play and record the test signals in PipeWire
+// #######################################################
+
 pub struct Play<'a> {
     pub node: &'a str,
     pub rate: u32,

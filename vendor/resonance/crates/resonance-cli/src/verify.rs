@@ -351,7 +351,9 @@ fn report(
     }
 }
 
-// ── Broadband A/B compare (issue #57) ────────────────────────────────────────
+// #######################################################
+// Broadband A/B compare (issue #57)
+// #######################################################
 
 /// Play a deterministic broadband stimulus, capture the post-DSP waveform, then
 /// either save it (`--save-capture`) or compare it against a saved capture
@@ -481,7 +483,9 @@ fn stimulus_samples(rate: f64, secs: f64, amp: f64) -> Vec<f32> {
     out
 }
 
-// ── Platform measurement paths ───────────────────────────────────────────────
+// #######################################################
+// Platform measurement paths
+// #######################################################
 //
 // Unix (Linux/macOS): play the tone with the system player (it routes through
 // the daemon like any application) and read the daemon's post-DSP rolling
@@ -779,7 +783,9 @@ mod win {
     }
 }
 
-// ── Analysis ─────────────────────────────────────────────────────────────────
+// #######################################################
+// Analysis
+// #######################################################
 
 fn rms_db(samples: &[f32]) -> f64 {
     if samples.is_empty() {
@@ -818,7 +824,9 @@ fn sine_amplitude(samples: &[f32], rate: f64, freq: f64) -> f64 {
     (a * a + b * b).sqrt()
 }
 
-// ── A/B compare analysis (issue #57) ─────────────────────────────────────────
+// #######################################################
+// A/B compare analysis (issue #57)
+// #######################################################
 //
 // Two full-waveform captures of the *same* deterministic broadband stimulus, one
 // per DSP configuration. Because the input is identical, every difference is what
@@ -1066,7 +1074,9 @@ mod tests {
         assert!(rms_db(&vec![0.0f32; 1000]) < -100.0);
     }
 
-    // ── A/B compare (issue #57) ──────────────────────────────────────────────
+    // #######################################################
+    // A/B compare (issue #57)
+    // #######################################################
 
     /// Deterministic broadband noise (fixed-seed LCG), the stimulus stand-in.
     fn noise(n: usize, seed: u64) -> Vec<f64> {

@@ -5,6 +5,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+// #######################################################
+// select the default Core Audio output in the prototype guest
+// #######################################################
+
 static void name_of(AudioObjectID d, char *out, size_t n) {
     CFStringRef s = NULL;
     UInt32 sz = sizeof s;

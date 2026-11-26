@@ -8,6 +8,10 @@ use resonance_dsp::chain::{FxEffect, ProcessorChain};
 use resonance_dsp::filter::{ApoFilter, FilterType};
 use std::hint::black_box;
 
+// #######################################################
+// measure throughput for the processing chain
+// #######################################################
+
 const SAMPLE_RATE: f64 = 48_000.0;
 const CHANNELS: usize = 2;
 /// One `PipeWire` quantum-ish block (256 frames × 2 ch).

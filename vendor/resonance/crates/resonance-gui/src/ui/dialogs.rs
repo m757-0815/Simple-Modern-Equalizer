@@ -11,7 +11,9 @@ use crate::ui::widgets::dialog_window;
 use eframe::egui;
 use resonance_ipc::Command;
 
-// ── Tray service-worker fns ──────────────────────────────────────────────
+// #######################################################
+// Tray service-worker fns
+// #######################################################
 //
 // `ServiceFn` is a plain non-capturing `fn() -> io::Result<()>` pointer (see
 // `app.rs`), not a boxed closure, so state to act on (start vs stop, on vs
@@ -135,7 +137,9 @@ impl GuiApp {
         }
     }
 
-    // ── Settings dialog ─────────────────────────────────────────────────────
+    // #######################################################
+    // Settings dialog
+    // #######################################################
 
     /// App settings modal: advanced-feature visibility toggles, the relocated
     /// channel controls, and the theme picker (moved out of the overflow menu).
@@ -149,7 +153,9 @@ impl GuiApp {
             .open(&mut open)
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    // ── Theme ─────────────────────────────────────────────────
+                    // #######################################################
+                    // Theme
+                    // #######################################################
                     ui.add_space(4.0);
                     ui.label(egui::RichText::new("Theme").strong());
                     let cctx = ui.ctx().clone();
@@ -162,7 +168,9 @@ impl GuiApp {
                     // Pane show/hide lives in arrange mode now (☰ → Edit layout):
                     // its Hidden tray is the single place to add/remove panes.
 
-                    // ── Channels ──────────────────────────────────────────────
+                    // #######################################################
+                    // Channels
+                    // #######################################################
                     ui.add_space(8.0);
                     ui.separator();
                     ui.add_space(4.0);
@@ -177,7 +185,9 @@ impl GuiApp {
                         ui.weak("Connect the daemon to configure channels.");
                     }
 
-                    // ── Advanced features ─────────────────────────────────────
+                    // #######################################################
+                    // Advanced features
+                    // #######################################################
                     ui.add_space(8.0);
                     ui.separator();
                     ui.add_space(4.0);
@@ -199,7 +209,9 @@ impl GuiApp {
                         "Convolution section (WAV impulse response)",
                     );
 
-                    // ── EQ phase ──────────────────────────────────────────────
+                    // #######################################################
+                    // EQ phase
+                    // #######################################################
                     ui.add_space(8.0);
                     ui.separator();
                     ui.add_space(4.0);
@@ -253,7 +265,9 @@ impl GuiApp {
                         ui.weak("Connect the daemon to change the EQ phase mode.");
                     }
 
-                    // ── Tray ──────────────────────────────────────────────────
+                    // #######################################################
+                    // Tray
+                    // #######################################################
                     ui.add_space(8.0);
                     ui.separator();
                     ui.add_space(4.0);
@@ -377,7 +391,9 @@ impl GuiApp {
         }
     }
 
-    // ── Preset load dialog ──────────────────────────────────────────────────
+    // #######################################################
+    // Preset load dialog
+    // #######################################################
 
     pub(crate) fn preset_dialog(&mut self, ctx: &egui::Context) {
         let Dialog::LoadPreset(browser) = &mut self.dialog else {
@@ -501,7 +517,9 @@ impl GuiApp {
         }
     }
 
-    // ── Impulse-response (convolution) picker ───────────────────────────────
+    // #######################################################
+    // Impulse-response (convolution) picker
+    // #######################################################
 
     /// `.wav` picker for the convolution stage — the Load-preset navigator with
     /// a WAV-header preview, sending `SetConvolutionIr` on pick.

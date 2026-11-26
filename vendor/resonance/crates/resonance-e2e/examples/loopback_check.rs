@@ -2,6 +2,11 @@
 //! `<record device>` (an input device) with no Resonance in the path; the recording must
 //! be bit-exact. usage: loopback_check <play> <record> <channels> <rate>
 #![allow(clippy::doc_markdown)]
+
+// #######################################################
+// check that a test device can play and record sound
+// #######################################################
+
 #[cfg(any(windows, target_os = "macos"))]
 mod imp {
     use cpal::traits::{DeviceTrait, HostTrait};

@@ -15,6 +15,10 @@ use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+// #######################################################
+// capture the Windows render endpoint for diagnostics
+// #######################################################
+
 /// Best-effort human-readable cpal device name.
 fn device_name(d: &Device) -> String {
     match d.description() {

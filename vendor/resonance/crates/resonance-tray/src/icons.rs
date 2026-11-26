@@ -2,6 +2,10 @@
 //! "bypassed" and macOS "template" variants are derived in-process, so we ship
 //! one asset and carry no runtime SVG rasterizer.
 
+// #######################################################
+// decode and prepare the tray icon
+// #######################################################
+
 const ICON_PNG: &[u8] = include_bytes!("../assets/icon-64.png");
 
 pub struct IconRgba {

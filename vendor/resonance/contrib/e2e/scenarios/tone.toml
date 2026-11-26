@@ -1,6 +1,10 @@
 # Steady-tone scenarios (spec section 15). THD+N / SNR limits are set from measured runs with
 # margin; the report notes of every run carry the measured numbers.
 
+#######################################################
+# check the basic response of each backend with test tones
+#######################################################
+
 [[scenario]]
 id = "thdn-flat"
 tier = "full"

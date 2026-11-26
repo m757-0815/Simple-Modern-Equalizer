@@ -24,6 +24,10 @@ use std::io;
 use std::path::PathBuf;
 use std::process::Command;
 
+// #######################################################
+// manage the macOS daemon launch agent
+// #######################################################
+
 pub const UNIT_NAME: &str = "com.ealtun21.resonanced";
 
 pub const UNAVAILABLE_MESSAGE: &str =

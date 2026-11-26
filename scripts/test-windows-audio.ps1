@@ -3,6 +3,10 @@
 param([switch]$SelfTest)
 $ErrorActionPreference = 'Stop'
 
+#######################################################
+# read enabled callbacks from the Windows audio engine
+#######################################################
+
 function Get-Callback([string[]]$Lines, [int[]]$AudioEngineIds) {
     foreach ($line in $Lines) {
         if ($line -match '^pid=(\d+) process #\d+: in_peak=[\d.]+ in_rms=([\d.]+) frames=[1-9]\d* ch=[1-9]\d* enabled=(true|false) ') {
@@ -27,6 +31,10 @@ function Test-TonePattern($Phases) {
     }
     return $false
 }
+
+#######################################################
+# generate a quiet test tone in memory
+#######################################################
 
 function New-Tone([double]$Amplitude) {
     $rate = 24000
@@ -55,6 +63,10 @@ function New-Tone([double]$Amplitude) {
     return $stream
 }
 
+#######################################################
+# check the detector against recorded fixtures
+#######################################################
+
 if ($SelfTest) {
     foreach ($case in 'working','daemon-only','disabled','constant','other-process','missing-phase') {
         $phases = [collections.ArrayList]::new()
@@ -72,6 +84,10 @@ if ($SelfTest) {
     exit 0
 }
 
+#######################################################
+# play the test tones and verify that the audio effect receives them
+#######################################################
+
 $log = if ($env:RESONANCE_APO_LOG) { $env:RESONANCE_APO_LOG } else { Join-Path $env:ProgramData 'Resonance\apo.log' }
 Write-Output 'Playing three quiet tones on the default playback device. Pause other audio and leave EQ enabled.'
 $phases = [collections.ArrayList]::new()
@@ -79,6 +95,7 @@ foreach ($amplitude in 0.006,0.048,0.006) {
     $stream = New-Tone $amplitude
     $player = [System.Media.SoundPlayer]::new($stream)
     try {
+        # Use the log position before playback to isolate callbacks for this tone.
         $offset = if (Test-Path -LiteralPath $log) { (Get-Item -LiteralPath $log).Length } else { 0 }
         $player.PlaySync()
         $lines = @()

@@ -1,3 +1,7 @@
+// #######################################################
+// handle navigation and editing in terminal settings
+// #######################################################
+
 pub const TABS: [&str; 7] = [
     "Profiles",
     "Mappings",

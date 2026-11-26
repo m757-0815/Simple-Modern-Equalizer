@@ -1,3 +1,7 @@
+#######################################################
+# play the reference stimulus in the Windows prototype guest
+#######################################################
+
 param([string]$In = 'C:\stim8.raw', [int]$Secs = 8)
 Remove-Item C:\out.raw -ErrorAction SilentlyContinue
 $cap = Start-Process -PassThru -WindowStyle Hidden 'C:\Program Files\Resonance\resonanced.exe' -ArgumentList '--measure-loopback','Scream','C:\out.raw',"$Secs" -RedirectStandardOutput C:\cap.out -RedirectStandardError C:\cap.err

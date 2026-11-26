@@ -6,6 +6,10 @@
 use std::io;
 use std::path::PathBuf;
 
+// #######################################################
+// report unsupported service operations
+// #######################################################
+
 pub const UNIT_NAME: &str = "resonanced";
 
 pub const UNAVAILABLE_MESSAGE: &str =

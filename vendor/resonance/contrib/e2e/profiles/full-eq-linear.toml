@@ -1,3 +1,7 @@
+#######################################################
+# exercise the full EQ with linear-phase filtering
+#######################################################
+
 linear_phase = true
 # Every UI band type, all slopes, mid/side scopes, a per-channel band and a
 # dynamic band. 8 bands (snapshots hold at most 32).

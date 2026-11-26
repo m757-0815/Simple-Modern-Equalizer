@@ -16,6 +16,10 @@
 
 use libfuzzer_sys::fuzz_target;
 
+// #######################################################
+// exercise the graphic EQ fitter with arbitrary input
+// #######################################################
+
 fn bytes_to_points(data: &[u8]) -> Vec<(f64, f64)> {
     data.chunks_exact(16)
         .map(|c| {

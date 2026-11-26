@@ -1,5 +1,9 @@
 name: Build installers
 
+#######################################################
+# select installer build triggers
+#######################################################
+
 on:
   workflow_dispatch:
   push:
@@ -7,6 +11,10 @@ on:
 
 permissions:
   contents: read
+
+#######################################################
+# build and upload the platform installers
+#######################################################
 
 jobs:
   windows:
@@ -35,6 +43,10 @@ jobs:
           archive: false
           if-no-files-found: error
 
+  #######################################################
+  # package the Linux AppImage
+  #######################################################
+
   appimage:
     runs-on: ubuntu-24.04
     steps:
@@ -52,6 +64,10 @@ jobs:
           path: dist/Simple-Modern-Equalizer-x86_64.AppImage
           archive: false
           if-no-files-found: error
+
+  #######################################################
+  # build against the Fedora packaging libraries
+  #######################################################
 
   fedora:
     runs-on: ubuntu-24.04
@@ -77,6 +93,10 @@ jobs:
           path: dist/*.rpm
           archive: false
           if-no-files-found: error
+
+  #######################################################
+  # build Debian and Ubuntu packages in their own containers
+  #######################################################
 
   deb:
     name: Build .deb for ${{ matrix.platform }}
@@ -118,6 +138,10 @@ jobs:
           path: dist/*.deb
           archive: false
           if-no-files-found: error
+
+  #######################################################
+  # archive the tracked sources
+  #######################################################
 
   source:
     runs-on: ubuntu-24.04

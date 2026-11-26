@@ -4,6 +4,11 @@
 #   gui-run.sh [-t SECS] 'command line'
 # The process is a child of launchd in gui/<uid>, so TCC attributes it to itself (like the product's
 # own daemon agent), never to sshd.
+
+#######################################################
+# launch the lifecycle probe in the macOS desktop session
+#######################################################
+
 set -u
 T=120
 [ "${1:-}" = -t ] && { T=$2; shift 2; }

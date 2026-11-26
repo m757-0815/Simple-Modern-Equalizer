@@ -1,5 +1,10 @@
 # Plain linear bands (no dynamic band), so a steady tone stays steady. The pilot sits on a +3 dB
 # peak: a level or pitch change anywhere in the chain shows.
+
+#######################################################
+# set the EQ profile for the tone tests
+#######################################################
+
 preamp_db = -3.0
 
 [[bands]]

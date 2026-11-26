@@ -1,3 +1,7 @@
+#######################################################
+# build the host-side audio test coordinator
+#######################################################
+
 [package]
 name = "xtask"
 version.workspace = true

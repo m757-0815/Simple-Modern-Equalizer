@@ -5,6 +5,10 @@ const BASS_HZ: f64 = 120.0;
 const MID_HZ: f64 = 1000.0;
 const TREBLE_HZ: f64 = 4000.0;
 
+// #######################################################
+// map clipping to the Simple tone controls
+// #######################################################
+
 pub fn clipping_controls(regions: &[(f32, f32)]) -> [bool; 3] {
     // Group the spectrum around the tone controls using log-frequency midpoints.
     let edges = [
@@ -17,6 +21,10 @@ pub fn clipping_controls(regions: &[(f32, f32)]) -> [bool; 3] {
         regions.iter().any(|&(start, end)| start < edges[index + 1] && end > edges[index])
     })
 }
+
+// #######################################################
+// turn the Simple controls into an EQ preset
+// #######################################################
 
 #[derive(Clone, Default, Deserialize, PartialEq, Serialize)]
 #[serde(default)]

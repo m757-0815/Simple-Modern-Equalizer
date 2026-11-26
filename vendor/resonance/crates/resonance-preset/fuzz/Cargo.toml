@@ -2,6 +2,11 @@
 # (repo root) never treats `fuzz/` as a member — `cargo build --all` / `cargo
 # test --all` from the repo root do not see or build it. It only builds under
 # `cargo +nightly fuzz`.
+
+#######################################################
+# build the preset parsers and curve fitter for fuzzing
+#######################################################
+
 [workspace]
 
 [package]

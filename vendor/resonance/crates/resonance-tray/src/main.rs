@@ -15,6 +15,10 @@ use resonance_ipc::tray::{self, Ui, control::GUI_INSTANCE};
 use std::sync::mpsc::channel;
 use std::time::Duration;
 
+// #######################################################
+// start the optional system tray client
+// #######################################################
+
 mod backend;
 mod daemon;
 mod icons;

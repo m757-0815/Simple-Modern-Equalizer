@@ -10,6 +10,11 @@
 # Each WxH (e.g. 1240x760, 900x650, 480x720) is rendered to <out>/ui_WxH.png.
 # Requires: Xvfb, imagemagick (import), a built resonance-gui. Software GL via
 # llvmpipe is forced so it works on a headless server with no GPU.
+
+#######################################################
+# capture the Resonance interface for documentation
+#######################################################
+
 set -euo pipefail
 
 BIN="${RESONANCE_GUI_BIN:-target/debug/resonance-gui}"

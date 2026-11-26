@@ -7,7 +7,7 @@ use resonance_dsp::convolution::{ConvolutionEngine, IrData, MAX_IR_SECONDS};
 use resonance_dsp::filter::{ApoFilter, FilterError, FilterType};
 use resonance_ipc::{
     AbSlot, BandScope, BandState, BandType, ChannelMask, Command, EffectsState, FxEffectId,
-    Response, RoutingMatrix,
+    OutputEffects, Response, RoutingMatrix,
 };
 use resonance_preset::model::{ApoFilterType, EqBand};
 use resonance_preset::{
@@ -61,6 +61,10 @@ pub async fn run(state: SharedState) -> Result<()> {
     }
 }
 
+// #######################################################
+// serve commands over each client connection
+// #######################################################
+
 /// Spawn a task to service one client connection over any async stream.
 fn spawn_client<S>(stream: S, state: SharedState)
 where
@@ -106,6 +110,10 @@ where
     Ok(())
 }
 
+// #######################################################
+// apply commands to the daemon and audio chain
+// #######################################################
+
 /// Route one client command to its handler and produce the reply.
 ///
 /// Each arm is a thin delegation to a focused handler so the wiring of command
@@ -128,6 +136,7 @@ async fn dispatch(cmd: Command, state: &SharedState) -> Response {
             | Command::SetBandDynamics { .. }
             | Command::SetBandChannels { .. }
             | Command::ApplyState { .. }
+            | Command::ApplyStateWithOutputEffects { .. }
             | Command::Reset
             | Command::LoadPreset { .. }
             | Command::LoadProfile { .. }
@@ -219,7 +228,24 @@ async fn dispatch_inner(cmd: Command, state: &SharedState) -> Response {
             enabled,
             bands,
             effects,
-        } => handle_apply_state(state, preamp_db, enabled, bands, effects),
+        } => handle_apply_state(state, preamp_db, enabled, bands, effects, OutputEffects::default()),
+        Command::ApplyStateWithOutputEffects { preamp_db, enabled, bands, effects, output_effects } => {
+            handle_apply_state(state, preamp_db, enabled, bands, effects, output_effects)
+        }
+        Command::SetOutputEffects(effects) => {
+            let command = || AudioCommand::SetOutputEffects(effects);
+            state.send(command(), |chain| crate::audio::apply_command(chain, command()));
+            Response::Ok
+        }
+        Command::ReadLimiterReduction => {
+            let inner = state.0.lock().unwrap();
+            let reduction = if inner.chain.enabled && inner.chain.limiter.enabled() {
+                inner.meters.limiter_reduction_db()
+            } else {
+                0.0
+            };
+            Response::LimiterReduction(reduction)
+        }
         Command::Reset => handle_reset(state),
         Command::ExportApo { path } => handle_export_apo(state, &path),
         Command::ExportProfile { path } => handle_export_profile(state, &path),
@@ -240,11 +266,121 @@ async fn dispatch_inner(cmd: Command, state: &SharedState) -> Response {
         Command::CaptureMonitor { frames } => state.0.lock().unwrap().monitor.read(frames),
         #[cfg(not(target_os = "linux"))]
         Command::CaptureMonitor { .. } => Response::Error("Pre-EQ capture requires PipeWire".into()),
+        #[cfg(target_os = "linux")]
+        Command::ReadTruePeak { reset } => state.0.lock().unwrap().monitor.read_true_peak(reset),
+        #[cfg(not(target_os = "linux"))]
+        Command::ReadTruePeak { .. } => Response::Error("Daemon true-peak capture requires PipeWire".into()),
+        #[cfg(target_os = "linux")]
+        Command::ApplyPlayback { preamp_db, enabled, bands, routing, convolution } => {
+            handle_apply_playback(state, preamp_db, enabled, bands, routing, convolution, EffectsState::default(), OutputEffects::default()).await
+        }
+        #[cfg(target_os = "linux")]
+        Command::ApplyPlaybackWithEffects { preamp_db, enabled, bands, routing, convolution, effects } => {
+            handle_apply_playback(state, preamp_db, enabled, bands, routing, convolution, effects, OutputEffects::default()).await
+        }
+        #[cfg(target_os = "linux")]
+        Command::ApplyAdvancedPlayback { preamp_db, enabled, bands, routing, convolution, effects, output_effects } => {
+            handle_apply_playback(state, preamp_db, enabled, bands, routing, convolution, effects, output_effects).await
+        }
+        #[cfg(not(target_os = "linux"))]
+        Command::ApplyPlayback { .. } | Command::ApplyPlaybackWithEffects { .. }
+        | Command::ApplyAdvancedPlayback { .. } => Response::Error("Playback transitions require PipeWire".into()),
         Command::ResetAndExportChain { path } => handle_reset_and_export_chain(state, &path),
         // The actual cleanup + exit happens in `handle_client` after this Ok is
         // flushed to the client (see the `is_shutdown` branch there).
         Command::Shutdown => Response::Ok,
     }
+}
+
+// #######################################################
+// prepare the playback filters off the audio thread
+// #######################################################
+
+#[cfg(target_os = "linux")]
+async fn handle_apply_playback(
+    state: &SharedState,
+    preamp_db: f64,
+    enabled: bool,
+    bands: Vec<BandState>,
+    routing: Option<RoutingMatrix>,
+    convolution: Option<String>,
+    effects: EffectsState,
+    output_effects: OutputEffects,
+) -> Response {
+    let (channels, rate) = {
+        let inner = state.0.lock().unwrap();
+        (
+            inner.meters.channels().unwrap_or(inner.chain.channels),
+            inner.meters.sample_rate().unwrap_or(inner.chain.sample_rate),
+        )
+    };
+    let warm_crossfeed = effects.crossfeed_enabled && effects.crossfeed_intensity > 0.0 && channels > 1;
+    let profile = Profile {
+        preamp_db,
+        enabled,
+        bands,
+        effects,
+        dither_bits: None,
+        convolution: None,
+        phase_mode: false,
+    };
+    let prepared = tokio::task::spawn_blocking(move || -> Result<_, String> {
+        let mut chain = profile.into_chain(channels, rate);
+        crate::audio::apply_command(&mut chain, AudioCommand::SetOutputEffects(output_effects));
+        if let Some(matrix) = routing {
+            if matrix.in_ch != channels || matrix.out_ch != channels {
+                return Err("The output channel count changed during playback preparation.".into());
+            }
+            chain.routing = Some(matrix.to_dsp().ok_or("Invalid playback channel routing.")?);
+        }
+        let mut warmup_frames = 0;
+        if let Some(path) = convolution {
+            let ir = std::sync::Arc::new(crate::ir::load_wav_ir(&path)?);
+            warmup_frames = playback_warmup_frames(&ir, rate);
+            chain.convolution.load_ir(ir)?;
+        }
+        // Let the parametric and crossfeed filters settle before the transition.
+        if !chain.filters.is_empty() || warm_crossfeed {
+            warmup_frames = warmup_frames.max((rate * 0.02).ceil() as usize);
+        }
+        if chain.room.amount() > 0.0 && channels == 2 {
+            warmup_frames = warmup_frames.max(chain.room.warmup_frames());
+        }
+        if chain.limiter.enabled() {
+            warmup_frames += (rate * 0.008).ceil() as usize;
+        }
+        let shadow = chain.clone();
+        Ok((Box::new(chain), shadow, warmup_frames))
+    })
+    .await;
+    match prepared {
+        Ok(Ok((chain, shadow, warmup_frames))) => {
+            state.send(AudioCommand::ReplacePlayback { chain, warmup_frames }, move |current| {
+                *current = shadow;
+            });
+            Response::Ok
+        }
+        Ok(Err(error)) => Response::Error(error),
+        Err(error) => Response::Error(format!("Playback preparation failed: {error}")),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn playback_warmup_frames(ir: &IrData, rate: f64) -> usize {
+    // Bound the contribution of history the new convolver has yet to see.
+    // The absolute amplitude of the omitted tail stays below 0.0001 for
+    // full-scale input. Flat and broad filters can settle much sooner than
+    // their full tap count, while a centered FIR waits for its delayed output.
+    let cap = (ir.sample_rate * MAX_IR_SECONDS) as usize;
+    let latest = ir.channels.iter().map(|channel| {
+        let samples = &channel[..channel.len().min(cap)];
+        let mut tail = 0.0;
+        samples.iter().rposition(|sample| {
+            tail += sample.abs();
+            tail > 0.0001
+        }).map_or(0, |index| index + 1)
+    }).max().unwrap_or(0);
+    resonance_dsp::convolution::BLOCK + (latest as f64 * rate / ir.sample_rate).ceil() as usize
 }
 
 /// Map a `Result<(), String>` config/IO outcome onto the IPC reply: `Ok` on
@@ -294,9 +430,7 @@ fn handle_set_sink_mute(state: &SharedState, name: String, muted: bool) -> Respo
 
 /// Toggle the master power (bypass) flag.
 fn handle_set_power(state: &SharedState, enabled: bool) -> Response {
-    state.send(AudioCommand::SetPower(enabled), |chain| {
-        chain.enabled = enabled;
-    });
+    state.send(AudioCommand::SetPower(enabled), |chain| chain.set_power(enabled));
     Response::Ok
 }
 
@@ -1025,6 +1159,7 @@ fn handle_apply_state(
     enabled: bool,
     bands: Vec<BandState>,
     effects: EffectsState,
+    output_effects: OutputEffects,
 ) -> Response {
     let snap = state.snapshot();
     let profile = Profile {
@@ -1042,7 +1177,7 @@ fn handle_apply_state(
         }),
         phase_mode: snap.phase_mode_linear,
     };
-    apply_profile_chain(&profile, state);
+    apply_profile_chain_with_output_effects(&profile, state, output_effects);
     info!("bulk state applied (ApplyState: undo/redo or bulk edit)");
     Response::Ok
 }
@@ -1299,6 +1434,10 @@ fn load_profile(name: &str, state: &SharedState) -> Result<(), String> {
 /// A/B recall never re-hit the disk). A missing or corrupt IR file drops the
 /// stage with a warning instead of failing the whole profile apply.
 pub(crate) fn apply_profile_chain(profile: &Profile, state: &SharedState) {
+    apply_profile_chain_with_output_effects(profile, state, OutputEffects::default());
+}
+
+fn apply_profile_chain_with_output_effects(profile: &Profile, state: &SharedState, output_effects: OutputEffects) {
     let ir = profile
         .convolution
         .as_ref()
@@ -1306,6 +1445,7 @@ pub(crate) fn apply_profile_chain(profile: &Profile, state: &SharedState) {
     let conv_enabled = profile.convolution.as_ref().is_some_and(|c| c.enabled);
     state.rebuild_chain(|ch, sr| {
         let mut chain = profile.clone().into_chain(ch, sr);
+        crate::audio::apply_command(&mut chain, AudioCommand::SetOutputEffects(output_effects));
         if let Some(ir) = ir.clone() {
             match chain.convolution.load_ir(ir) {
                 Ok(()) => chain.convolution.set_enabled(conv_enabled),
@@ -1447,7 +1587,9 @@ mod tests {
         assert!(!channel_indices_in_range(0, 0, 0));
     }
 
-    // ── Convolution end-to-end (real WAV file → dispatch → chain) ──────────
+    // #######################################################
+    // Convolution end-to-end (real WAV file → dispatch → chain)
+    // #######################################################
 
     fn test_state() -> (SharedState, rtrb::Consumer<AudioCommand>) {
         let (tx, rx) = rtrb::RingBuffer::new(16);
@@ -1464,6 +1606,33 @@ mod tests {
             ),
             rx,
         )
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn playback_transition_prepares_crossfeed_with_the_chain() {
+        use resonance_dsp::effects::Effect;
+        let (state, mut rx) = test_state();
+        let mut effects = EffectsState::default();
+        effects.set(FxEffectId::Crossfeed, 0.5, true);
+        let command = Command::ApplyPlaybackWithEffects {
+            preamp_db: 0.0,
+            enabled: true,
+            bands: Vec::new(),
+            routing: None,
+            convolution: None,
+            effects,
+        };
+        assert!(matches!(dispatch(command, &state).await, Response::Ok));
+        let Ok(AudioCommand::ReplacePlayback { mut chain, warmup_frames }) = rx.pop() else {
+            panic!("expected a prepared playback chain");
+        };
+        assert!(warmup_frames > 0);
+        assert!(chain.crossfeed.enabled());
+        assert_eq!(state.snapshot().effects.get(FxEffectId::Crossfeed), (0.5, true));
+        let mut signal = [0.75, 0.0].repeat(warmup_frames);
+        chain.process(&mut signal);
+        assert!((signal.last().unwrap() - 0.15).abs() < 0.001);
     }
 
     /// Write a mono float32 WAV at 48 kHz (the test chains' rate → no resample,

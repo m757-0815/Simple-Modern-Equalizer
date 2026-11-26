@@ -19,6 +19,10 @@ use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
+// #######################################################
+// manage login startup through desktop entries
+// #######################################################
+
 pub const UNIT_NAME: &str = "resonanced.desktop";
 
 fn config_home() -> PathBuf {

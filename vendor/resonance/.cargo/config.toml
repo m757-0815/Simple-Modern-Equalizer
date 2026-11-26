@@ -9,6 +9,11 @@
 # and resonance-tui are fully static (pure Rust + C via musl libc).
 # resonance-daemon links to libpipewire which loads plugins at runtime
 # and cannot be fully static; it will dynamically link libpipewire.so.
+
+#######################################################
+# choose build flags and aliases for the vendored workspace
+#######################################################
+
 [target.x86_64-unknown-linux-musl]
 linker = "x86_64-linux-musl-gcc"
 

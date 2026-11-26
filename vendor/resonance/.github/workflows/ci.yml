@@ -1,3 +1,7 @@
+#######################################################
+# check the Resonance workspace on every supported platform
+#######################################################
+
 name: CI
 
 on:

@@ -6,9 +6,15 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Push-Location $projectRoot
 try {
+
+    #######################################################
+    # build the app, daemon, and audio component
+    #######################################################
+
     $metadata = cargo metadata --locked --no-deps --format-version 1
     if ($LASTEXITCODE) { throw 'Could not read the app version' }
     $version = ($metadata | ConvertFrom-Json).packages[0].version
+    # Link the C runtime into the Rust binaries for distribution.
     $env:RUSTFLAGS = '-C target-feature=+crt-static'
     cargo build --locked --release
     if ($LASTEXITCODE) { throw 'Simple Modern Equalizer build failed' }
@@ -19,6 +25,11 @@ try {
         & ./vendor/resonance/contrib/windows/build-apo.ps1
         if ($LASTEXITCODE) { throw 'Windows audio component build failed' }
     } finally { Pop-Location }
+
+    #######################################################
+    # stage the Windows binaries and install scripts
+    #######################################################
+
     $stage = Join-Path $projectRoot 'dist/windows'
     New-Item -ItemType Directory -Force -Path $stage | Out-Null
     Copy-Item -LiteralPath 'target/release/simple-modern-equalizer.exe' -Destination $stage
@@ -28,9 +39,15 @@ try {
     Copy-Item -LiteralPath 'vendor/resonance/contrib/windows/uninstall-apo.ps1' -Destination $stage
     Copy-Item -LiteralPath 'LICENSE','THIRD_PARTY_NOTICES.md' -Destination $stage
     Copy-Item -LiteralPath 'ui/fonts/OFL.txt' -Destination (Join-Path $stage 'Inter-OFL.txt')
+
+    #######################################################
+    # generate the WiX installer from the staged files
+    #######################################################
+
     $installer = Join-Path $projectRoot 'dist/SimpleModernEqualizer-Setup-x64.msi'
     $wixArgs = @('build', 'packaging/windows.wxs', '-arch', 'x64', '-ext', $WixExtension,
         '-d', "StageDir=$stage", '-d', "ProductVersion=$version", '-o', $installer)
+    # WiX can be supplied as a native tool or a .NET assembly.
     if ($WixPath.EndsWith('.dll', [StringComparison]::OrdinalIgnoreCase)) {
         dotnet $WixPath @wixArgs
     } else {

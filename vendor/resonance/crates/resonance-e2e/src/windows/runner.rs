@@ -19,6 +19,10 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
 
+// #######################################################
+// run live tests through the Windows audio effect
+// #######################################################
+
 const OS: &str = "windows";
 
 /// Resonance-off lags per device format, and the committed baselines.

@@ -1,3 +1,7 @@
+#######################################################
+# declare package metadata and runtime requirements
+#######################################################
+
 %global debug_package %{nil}
 Name:           simple-modern-equalizer
 Version:        %{app_version}
@@ -13,6 +17,10 @@ Requires:       pipewire
 Adjust system audio with tone controls, a parametric equalizer,
 headphone presets, and live visualizations.
 
+#######################################################
+# install the staged files into the package root
+#######################################################
+
 %install
 install -Dm755 %{staged_app}/simple-modern-equalizer %{buildroot}%{_libexecdir}/%{name}/simple-modern-equalizer
 install -Dm755 %{staged_app}/resonanced %{buildroot}%{_libexecdir}/%{name}/resonanced
@@ -23,6 +31,10 @@ install -Dm644 %{staged_app}/share/icons/hicolor/256x256/apps/%{name}.png %{buil
 install -Dm644 %{staged_app}/LICENSE %{buildroot}%{_licensedir}/%{name}/LICENSE
 install -Dm644 %{staged_app}/Inter-OFL.txt %{buildroot}%{_licensedir}/%{name}/Inter-OFL.txt
 install -Dm644 %{staged_app}/THIRD_PARTY_NOTICES.md %{buildroot}%{_docdir}/%{name}/THIRD_PARTY_NOTICES.md
+
+#######################################################
+# validate the desktop entry before packaging
+#######################################################
 
 %check
 desktop-file-validate %{buildroot}%{_datadir}/applications/%{name}.desktop

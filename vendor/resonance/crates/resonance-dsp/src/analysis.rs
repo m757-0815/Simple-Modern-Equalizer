@@ -4,6 +4,10 @@
 use rustfft::{FftPlanner, num_complex::Complex};
 use std::f64::consts::PI;
 
+// #######################################################
+// measure signal levels, frequency content, and alignment
+// #######################################################
+
 fn hann(i: usize, n: usize) -> f64 {
     0.5 * (1.0 - (2.0 * PI * i as f64 / n as f64).cos())
 }

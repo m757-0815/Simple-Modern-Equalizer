@@ -5,6 +5,10 @@
 
 use std::path::PathBuf;
 
+// #######################################################
+// keep a single client instance and notify it to raise its window
+// #######################################################
+
 fn runtime_dir() -> PathBuf {
     crate::paths::runtime_dir()
 }

@@ -7,6 +7,10 @@
 
 use crate::scenario::{Kind, Scenario};
 
+// #######################################################
+// select the macOS audio test backend
+// #######################################################
+
 pub mod env;
 #[cfg(any(target_os = "macos", feature = "cross-check"))]
 pub mod runner;

@@ -11,6 +11,10 @@ use std::ffi::OsString;
 use std::io;
 use std::path::{Path, PathBuf};
 
+// #######################################################
+// read and write descriptive preset metadata
+// #######################################################
+
 /// Sidecar metadata for a preset file. All fields optional; `Default` is the
 /// empty sidecar.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

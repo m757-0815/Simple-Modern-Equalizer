@@ -14,6 +14,7 @@ use anyhow::Result;
 use pipewire as pw;
 use pipewire::properties::properties;
 use pipewire_sys as pw_sys;
+use pw::proxy::{ProxyListener, ProxyT};
 use pw::spa;
 use pw::spa::param::ParamType;
 use pw::spa::pod::{
@@ -29,8 +30,10 @@ use spa_sys::{
     SPA_PROP_mute, spa_hook, spa_io_position,
 };
 use std::{
+    cell::Cell,
     collections::HashMap,
     os::raw::c_void,
+    rc::Rc,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -129,6 +132,13 @@ struct RouteRead {
     muted: Option<bool>,
 }
 
+struct GraphLink {
+    _listener: ProxyListener,
+    _link: pw::link::Link,
+    // A removed or failed proxy can no longer serve its port pair.
+    unavailable: Rc<Cell<bool>>,
+}
+
 struct GraphState {
     raw_core: usize, // *mut pw_sys::pw_core stored as usize for Send
     sink_node_id: u32,
@@ -160,8 +170,8 @@ struct GraphState {
     sinks_vol_tx: tokio::sync::mpsc::UnboundedSender<Vec<SinkVolume>>,
     /// IPC → backend: per-sink volume/mute requests, drained in the timer.
     sink_ctl_rx: std::sync::mpsc::Receiver<SinkCtl>,
-    out_links: Vec<pw::link::Link>,
-    monitor_links: Vec<pw::link::Link>,
+    out_links: HashMap<(u32, u32), GraphLink>,
+    monitor_links: HashMap<(u32, u32), GraphLink>,
     metadata_obj: Option<pw::metadata::Metadata>,
     /// Listener that captures the pre-existing default sink from metadata.
     metadata_listener: Option<pw::metadata::MetadataListener>,
@@ -220,11 +230,21 @@ struct GraphState {
 // SAFETY: only touched from the pw main-loop thread.
 unsafe impl Send for GraphState {}
 
+// #######################################################
+// track the active and pending playback filters
+// #######################################################
+
 struct FilterData {
     /// One DSP buffer pointer per channel (length = processing channel count).
     in_ports: Vec<*mut c_void>,
     out_ports: Vec<*mut c_void>,
-    chain: ProcessorChain,
+    chain: Box<ProcessorChain>,
+    pending_playback: Option<PendingPlayback>,
+    playback_fade: Option<PlaybackFade>,
+    managed_playback: bool,
+    rate_fade: Option<RateFade>,
+    last_output: [f64; MAX_CH],
+    signal_present: bool,
     cmd_rx: rtrb::Consumer<AudioCommand>,
     spectrum_tx: rtrb::Producer<f32>,
     monitor: crate::monitor::Tap,
@@ -232,6 +252,8 @@ struct FilterData {
     scratch: Vec<f64>,
     /// Second interleaved scratch for the routing matrix output (square remap).
     routed: Vec<f64>,
+    previous_scratch: Vec<f64>,
+    previous_routed: Vec<f64>,
     /// Live meters published to the IPC thread.
     meters: Arc<AtomicMeters>,
     /// Last sample rate logged (so the *actual* negotiated graph rate is logged
@@ -245,6 +267,135 @@ const MAX_QUANTUM: usize = 8192;
 /// Hard ceiling on channels the RT callback gathers onto the stack (matches
 /// `resonance_dsp::channel::MAX_CHANNELS`); `target_channels()` already clamps to it.
 const MAX_CH: usize = 64;
+
+struct PendingPlayback {
+    chain: Box<ProcessorChain>,
+    warmup_frames: usize,
+}
+
+struct PlaybackFade {
+    previous: Box<ProcessorChain>,
+    warmup_frames: usize,
+    position: usize,
+    length: usize,
+}
+
+struct RateFade {
+    from: [f64; MAX_CH],
+    position: usize,
+    length: usize,
+}
+
+fn fade_weight(position: usize, length: usize) -> f64 {
+    let t = (position.min(length) as f64) / length as f64;
+    t * t * (3.0 - 2.0 * t)
+}
+
+impl FilterData {
+    fn queue_command(&mut self, command: AudioCommand) {
+        if let AudioCommand::ReplacePlayback { chain, warmup_frames } = command {
+            self.managed_playback = true;
+            self.pending_playback = Some(PendingPlayback { chain, warmup_frames });
+        } else {
+            let chain = match &mut self.pending_playback {
+                Some(pending) => &mut pending.chain,
+                None => &mut self.chain,
+            };
+            apply_command(chain, command);
+        }
+    }
+
+    // #######################################################
+    // prime the next filter before crossfading
+    // #######################################################
+
+    fn start_pending_playback(&mut self) {
+        if self.playback_fade.is_some() {
+            return;
+        }
+        let Some(mut next) = self.pending_playback.take() else { return };
+        let rate = self.chain.sample_rate;
+        if next.chain.sample_rate != rate {
+            // This command raced a graph change. The client will render a
+            // fresh IR for the reported rate; never rebuild the old IR here.
+            next.chain.convolution.clear();
+            next.chain.rebind_sample_rate(rate);
+            next.warmup_frames = 0;
+        }
+        next.chain.set_channels(self.in_ports.len());
+        let previous = std::mem::replace(&mut self.chain, next.chain);
+        if self.signal_present {
+            // Keep the old output until the replacement has enough history,
+            // even if its phase mode puts the main tap hundreds of ms later.
+            self.playback_fade = Some(PlaybackFade {
+                previous,
+                warmup_frames: next.warmup_frames,
+                position: 0,
+                length: (rate * 0.01).ceil() as usize,
+            });
+        }
+    }
+
+    // #######################################################
+    // keep audio flowing while the app prepares the new rate
+    // #######################################################
+
+    fn follow_sample_rate(&mut self, rate: f64) {
+        if self.chain.sample_rate == rate {
+            return;
+        }
+        if self.managed_playback {
+            self.playback_fade = None;
+            if let Some(next) = self.pending_playback.take() {
+                self.chain = next.chain;
+            }
+            // The app installs its new-rate filter asynchronously. Keep
+            // playback running in the meantime without the stale convolution.
+            if self.chain.sample_rate != rate {
+                self.chain.convolution.clear();
+            }
+            self.rate_fade = Some(RateFade {
+                from: self.last_output,
+                position: 0,
+                length: (rate * 0.005).ceil() as usize,
+            });
+        }
+        self.chain.rebind_sample_rate(rate);
+    }
+}
+
+impl PlaybackFade {
+    fn mix(&mut self, current: &mut [f64], previous: &[f64], channels: usize) {
+        for (current, previous) in current.chunks_exact_mut(channels)
+            .zip(previous.chunks_exact(channels))
+        {
+            let weight = fade_weight(self.position, self.length);
+            for (sample, &old) in current.iter_mut().zip(previous) {
+                *sample = old * (1.0 - weight) + *sample * weight;
+            }
+            if self.warmup_frames > 0 {
+                self.warmup_frames -= 1;
+            } else {
+                self.position = (self.position + 1).min(self.length);
+            }
+        }
+    }
+}
+
+impl RateFade {
+    fn mix(&mut self, current: &mut [f64], channels: usize) {
+        for frame in current.chunks_exact_mut(channels) {
+            if self.position == self.length {
+                break;
+            }
+            let weight = fade_weight(self.position, self.length);
+            for (sample, &old) in frame.iter_mut().zip(&self.from) {
+                *sample = old * (1.0 - weight) + *sample * weight;
+            }
+            self.position += 1;
+        }
+    }
+}
 
 // SAFETY: only touched from pw_filter process callback (RT thread).
 unsafe impl Send for FilterData {}
@@ -278,12 +429,20 @@ pub fn spawn(ctx: super::BackendCtx) -> Result<JoinHandle<()>> {
     let mut fd = Box::new(FilterData {
         in_ports: vec![std::ptr::null_mut(); channels],
         out_ports: vec![std::ptr::null_mut(); channels],
-        chain: initial_chain,
+        chain: Box::new(initial_chain),
+        pending_playback: None,
+        playback_fade: None,
+        managed_playback: false,
+        rate_fade: None,
+        last_output: [0.0; MAX_CH],
+        signal_present: false,
         cmd_rx,
         spectrum_tx,
         monitor,
         scratch: vec![0.0; MAX_QUANTUM * channels],
         routed: vec![0.0; MAX_QUANTUM * channels],
+        previous_scratch: vec![0.0; MAX_QUANTUM * channels],
+        previous_routed: vec![0.0; MAX_QUANTUM * channels],
         meters,
         logged_rate: 0.0,
     });
@@ -302,8 +461,8 @@ pub fn spawn(ctx: super::BackendCtx) -> Result<JoinHandle<()>> {
         route_reads: Arc::new(Mutex::new(HashMap::new())),
         sinks_vol_tx,
         sink_ctl_rx,
-        out_links: Vec::new(),
-        monitor_links: Vec::new(),
+        out_links: HashMap::new(),
+        monitor_links: HashMap::new(),
         metadata_obj: None,
         metadata_listener: None,
         original_default: Arc::new(Mutex::new(None)),
@@ -342,6 +501,8 @@ pub fn spawn(ctx: super::BackendCtx) -> Result<JoinHandle<()>> {
                         fd.out_ports = vec![std::ptr::null_mut(); n];
                         fd.scratch = vec![0.0; MAX_QUANTUM * n];
                         fd.routed = vec![0.0; MAX_QUANTUM * n];
+                        fd.previous_scratch = vec![0.0; MAX_QUANTUM * n];
+                        fd.previous_routed = vec![0.0; MAX_QUANTUM * n];
                         fd.chain.set_channels(n);
                         fd.logged_rate = 0.0;
                         tracing::info!("output device is now {n}ch — rebuilt the DSP chain");
@@ -378,6 +539,11 @@ pub fn spawn(ctx: super::BackendCtx) -> Result<JoinHandle<()>> {
                 fd.out_ports
                     .iter_mut()
                     .for_each(|p| *p = std::ptr::null_mut());
+                fd.playback_fade = None;
+                fd.rate_fade = None;
+                fd.last_output.fill(0.0);
+                fd.signal_present = false;
+                fd.monitor.gap();
                 let fd_ptr: *mut FilterData = &raw mut *fd;
 
                 let started = Instant::now();
@@ -417,7 +583,9 @@ fn build_and_run(fd_ptr: *mut FilterData, gs: &Arc<Mutex<GraphState>>) -> Result
     let quit_ptr = mainloop.as_raw_ptr() as usize;
     let _core_listener = register_core_error_listener(&core, quit_ptr);
 
-    // ── pw_filter (raw FFI) + its DSP ports ───────────────────────────────
+    // #######################################################
+    // pw_filter (raw FFI) + its DSP ports
+    // #######################################################
     let filter = create_filter(raw_core, fd_ptr)?;
 
     // Channel count + layout for this connection — fixed at the FilterData's port
@@ -441,7 +609,9 @@ fn build_and_run(fd_ptr: *mut FilterData, gs: &Arc<Mutex<GraphState>>) -> Result
     // would destroy the "Resonance EQ" sink (see `create_null_sink`).
     let _null_sink = create_null_sink(&core, &position)?;
 
-    // ── Registry listener (high-level, 'static closure via Arc) ──────────
+    // #######################################################
+    // Registry listener (high-level, 'static closure via Arc)
+    // #######################################################
     let registry = core.get_registry()?;
     // SAFETY: `core` and `registry` outlive the listener (same scope, dropped after mainloop).
     // The transmute extends the RegistryBox lifetime to 'static for the closure — safe because
@@ -451,7 +621,9 @@ fn build_and_run(fd_ptr: *mut FilterData, gs: &Arc<Mutex<GraphState>>) -> Result
     };
     let _listener = register_graph_listener(registry_static, gs);
 
-    // ── Poll filter node-id, then run main loop ───────────────────────────
+    // #######################################################
+    // Poll filter node-id, then run main loop
+    // #######################################################
     let quit_timer = mainloop.as_raw_ptr() as usize;
     let timer = spawn_graph_timer(&mainloop, gs, filter, quit_timer)?;
 
@@ -515,6 +687,9 @@ fn create_filter(
             ("node.description", "Resonance EQ Processor"),
             ("node.autoconnect", "false"),
             ("node.virtual", "true"),
+            // Short-lived streams can renegotiate the audio buffer mid-track.
+            // Keep it steady while this node runs and allow explicit overrides.
+            ("node.lock-quantum", "true"),
         ]);
         let f = pw_sys::pw_filter_new(raw_core, c"resonance-dsp".as_ptr(), props);
         anyhow::ensure!(!f.is_null(), "pw_filter_new");
@@ -784,9 +959,9 @@ fn channel_follow_step(
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// #######################################################
 // Registry event handlers
-// ─────────────────────────────────────────────────────────────────────────────
+// #######################################################
 
 fn on_global(
     g: &mut GraphState,
@@ -1039,7 +1214,7 @@ fn on_global_remove(g: &mut GraphState, id: u32) {
         .nodes
         .remove(&id)
         .is_some_and(|n| n.media_class == "Audio/Sink" && n.name != "resonance");
-    g.ports.remove(&id);
+    let removed_port = g.ports.remove(&id);
     // An application closed its stream — drop it and refresh the per-app list.
     if g.app_nodes.remove(&id).is_some() {
         publish_apps(g);
@@ -1053,14 +1228,20 @@ fn on_global_remove(g: &mut GraphState, id: u32) {
     if g.devices.remove(&id).is_some() {
         g.route_reads.lock().unwrap().retain(|(d, _), _| *d != id);
     }
-    if was_real_sink {
+    if was_real_sink
+        || removed_port.is_some_and(|port| {
+            port.node_id == g.sink_node_id
+                || port.node_id == g.filter_node_id
+                || Some(port.node_id) == find_target_sink(g)
+        })
+    {
         reroute(g);
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// #######################################################
 // Per-application volume / mute
-// ─────────────────────────────────────────────────────────────────────────────
+// #######################################################
 
 /// Push the current per-application stream list to the daemon, sorted by display
 /// name then key for a stable UI order.
@@ -1250,9 +1431,9 @@ fn apply_app_volumes(g: &mut GraphState) {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// #######################################################
 // Per-output-sink volume / mute (real devices; same model as the per-app path)
-// ─────────────────────────────────────────────────────────────────────────────
+// #######################################################
 
 /// Parse a `Device` `Route` param Pod → a [`RouteRead`] for an **output** route,
 /// or `None` for input routes / unparseable pods. Reads the route `index` +
@@ -1564,9 +1745,9 @@ fn set_virt_volume(g: &mut GraphState, (volume, muted): (f64, bool)) {
     g.virt_state = Some((volume, muted));
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// #######################################################
 // Link / routing helpers
-// ─────────────────────────────────────────────────────────────────────────────
+// #######################################################
 
 /// The real output sink Resonance feeds, by priority: the explicit pin
 /// (`SetOutputTarget`) — which always wins; else the live system default sink
@@ -1642,10 +1823,7 @@ fn reroute(g: &mut GraphState) {
             .filter(|p| p.node_id == g.filter_node_id && !p.is_output)
             .cloned()
             .collect();
-        if !srcs.is_empty() && !dsts.is_empty() {
-            g.monitor_links.clear();
-            g.monitor_links = create_links(core, &srcs, &dsts);
-        }
+        update_links(core, &mut g.monitor_links, &srcs, &dsts);
     }
 
     // Report available sinks (name + friendly description) for the selection UI.
@@ -1661,31 +1839,26 @@ fn reroute(g: &mut GraphState) {
     // filter-out → real device
     if g.filter_node_id != u32::MAX {
         let real_sink_id = find_target_sink(g);
-        if let Some(tid) = real_sink_id {
-            // Report the device name to the daemon when it changes (for output→profile mapping).
-            if let Some(name) = g.nodes.get(&tid).map(|n| n.name.clone()) {
-                if g.last_output.as_deref() != Some(name.as_str()) {
-                    g.last_output = Some(name.clone());
-                    let _ = g.output_tx.send(name);
-                }
-            }
-            let srcs: Vec<_> = g
-                .ports
-                .values()
-                .filter(|p| p.node_id == g.filter_node_id && p.is_output)
-                .cloned()
-                .collect();
-            let dsts: Vec<_> = g
-                .ports
-                .values()
-                .filter(|p| p.node_id == tid && !p.is_output)
-                .cloned()
-                .collect();
-            if !srcs.is_empty() && !dsts.is_empty() {
-                g.out_links.clear();
-                g.out_links = create_links(core, &srcs, &dsts);
-            }
+        // Report the device name to the daemon when it changes (for output→profile mapping).
+        if let Some(node) = real_sink_id.and_then(|id| g.nodes.get(&id))
+            && g.last_output.as_deref() != Some(node.name.as_str())
+        {
+            g.last_output = Some(node.name.clone());
+            let _ = g.output_tx.send(node.name.clone());
         }
+        let srcs: Vec<_> = g
+            .ports
+            .values()
+            .filter(|p| p.node_id == g.filter_node_id && p.is_output)
+            .cloned()
+            .collect();
+        let dsts: Vec<_> = g
+            .ports
+            .values()
+            .filter(|p| Some(p.node_id) == real_sink_id && !p.is_output)
+            .cloned()
+            .collect();
+        update_links(core, &mut g.out_links, &srcs, &dsts);
     }
 }
 
@@ -1707,8 +1880,10 @@ fn parse_metadata_name(value: &str) -> Option<String> {
 /// position (handles unlabeled ports and mismatched layouts). Stops when
 /// destinations run out. Pure (no `PipeWire` calls) so the pairing is unit-testable.
 fn pair_ports(srcs: &[PortMeta], dsts: &[PortMeta]) -> Vec<(u32, u32)> {
-    let mut srcs_sorted = srcs.to_vec();
+    let mut srcs_sorted: Vec<_> = srcs.iter().collect();
     srcs_sorted.sort_by_key(|p| p.id);
+    let mut dsts: Vec<_> = dsts.iter().collect();
+    dsts.sort_by_key(|p| p.id);
     let mut dst_used = vec![false; dsts.len()];
 
     let mut pairs = Vec::new();
@@ -1727,23 +1902,42 @@ fn pair_ports(srcs: &[PortMeta], dsts: &[PortMeta]) -> Vec<(u32, u32)> {
     pairs
 }
 
-fn create_links(
+fn update_links(
     core: &pw::core::Core,
+    links: &mut HashMap<(u32, u32), GraphLink>,
     srcs: &[PortMeta],
     dsts: &[PortMeta],
-) -> Vec<pw::link::Link> {
-    let mut out = Vec::new();
-    for (src_id, dst_id) in pair_ports(srcs, dsts) {
+) {
+    // Dropping a link disconnects the running graph. Registry changes elsewhere
+    // must leave the links for existing port pairs in place.
+    let pairs = pair_ports(srcs, dsts);
+    links.retain(|pair, link| pairs.contains(pair) && !link.unavailable.get());
+    for (src_id, dst_id) in pairs {
+        let std::collections::hash_map::Entry::Vacant(entry) = links.entry((src_id, dst_id)) else {
+            continue;
+        };
         let props = properties! {
             "link.output.port" => src_id.to_string(),
             "link.input.port"  => dst_id.to_string(),
             "object.linger"    => "false",
         };
         if let Ok(link) = core.create_object::<pw::link::Link>("link-factory", &props) {
-            out.push(link);
+            let unavailable = Rc::new(Cell::new(false));
+            let removed = Rc::clone(&unavailable);
+            let failed = Rc::clone(&unavailable);
+            let listener = link
+                .upcast_ref()
+                .add_listener_local()
+                .removed(move || removed.set(true))
+                .error(move |_, _, _| failed.set(true))
+                .register();
+            entry.insert(GraphLink {
+                _listener: listener,
+                _link: link,
+                unavailable,
+            });
         }
     }
-    out
 }
 
 fn try_set_default(g: &mut GraphState) {
@@ -1762,9 +1956,9 @@ fn try_set_default(g: &mut GraphState) {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// #######################################################
 // RT process callback
-// ─────────────────────────────────────────────────────────────────────────────
+// #######################################################
 
 /// Peak/RMS across `channels` mono `f32` buffers (RT-thread passthrough metering).
 /// Peak is the max over channels; RMS is the root-mean of per-channel mean-squares
@@ -1792,6 +1986,24 @@ unsafe fn ptrs_peak_rms(ptrs: &[*mut f32], channels: usize, n: usize) -> (f32, f
     (peak, rms, stereo)
 }
 
+fn render_chain<'a>(
+    chain: &mut ProcessorChain,
+    samples: &'a mut [f64],
+    routed: &'a mut [f64],
+    channels: usize,
+) -> &'a mut [f64] {
+    chain.process(samples);
+    // PipeWire's filter has the same number of input and output ports.
+    if chain.enabled
+        && matches!(&chain.routing, Some(m) if m.in_ch() == channels && m.out_ch() == channels)
+    {
+        chain.route(samples, routed);
+        routed
+    } else {
+        samples
+    }
+}
+
 unsafe extern "C" fn filter_process_cb(data: *mut c_void, position: *mut spa_io_position) {
     unsafe {
         let fd = &mut *data.cast::<FilterData>();
@@ -1810,15 +2022,13 @@ unsafe extern "C" fn filter_process_cb(data: *mut c_void, position: *mut spa_io_
         // biquad + effect coefficients were computed for the wrong rate, landing
         // every EQ band at the wrong frequency. Rebind to the live rate.
         //
-        // `rebind_sample_rate` is a no-op when unchanged, so the steady state pays
-        // nothing. It reallocates effect state on an actual change (rare: startup
-        // off-48k, or a graph rate renegotiation), which can cost one block —
-        // acceptable versus a whole session of wrong-rate audio.
+        // The app prepares its convolution for the new rate in the background.
+        // Only the rate-dependent state needed for interim playback is rebound here.
         let rate = (*position).clock.rate;
         if rate.num > 0 {
             let sr = f64::from(rate.denom) / f64::from(rate.num);
             if sr > 0.0 {
-                fd.chain.rebind_sample_rate(sr);
+                fd.follow_sample_rate(sr);
             }
         }
         // Publish the live rate for `status` (cheap relaxed store every block).
@@ -1854,34 +2064,45 @@ unsafe extern "C" fn filter_process_cb(data: *mut c_void, position: *mut spa_io_
         }
         // No output buffers this cycle → nothing to write.
         if outs[..channels].iter().any(|p| p.is_null()) {
+            fd.monitor.gap();
             return;
         }
 
         while let Ok(cmd) = fd.cmd_rx.pop() {
-            apply_command(&mut fd.chain, cmd);
+            fd.queue_command(cmd);
         }
+        fd.start_pending_playback();
 
         let have_in = ins[..channels].iter().all(|p| !p.is_null());
-        if !have_in || !fd.chain.enabled {
+        if !have_in || (!fd.chain.enabled && fd.playback_fade.is_none() && fd.rate_fade.is_none()) {
             if have_in {
                 for (&inp, &outp) in ins[..channels].iter().zip(&outs[..channels]) {
                     std::ptr::copy_nonoverlapping(inp, outp, n);
                 }
                 // Passthrough: in == out, no DSP cost.
                 let (p, r, stereo_rms) = ptrs_peak_rms(&outs, channels, n);
+                fd.signal_present = p > 0.00001;
+                for (last, &out) in fd.last_output.iter_mut().zip(&outs[..channels]) {
+                    *last = f64::from(*out.add(n - 1));
+                }
                 fd.meters.store(Sample {
                     in_peak: p,
                     out_peak: p,
                     in_rms: r,
                     out_rms: r,
                     stereo_rms,
+                    limiter_reduction_db: 0.0,
                     clip: p >= 0.999,
                     dsp_load: 0.0,
                     dsp_frame_us: 0,
                 });
             } else {
+                fd.signal_present = false;
+                fd.last_output.fill(0.0);
+                fd.playback_fade = None;
+                fd.rate_fade = None;
                 for &outp in &outs[..channels] {
-                    std::ptr::write_bytes(outp, 0, n * std::mem::size_of::<f32>());
+                    std::slice::from_raw_parts_mut(outp, n).fill(0.0);
                 }
                 fd.meters.store(Sample::default());
             }
@@ -1921,28 +2142,36 @@ unsafe extern "C" fn filter_process_cb(data: *mut c_void, position: *mut spa_io_
         }
         let (in_peak, in_rms) = peak_rms(&fd.scratch[..need]);
         let t0 = Instant::now();
-        fd.chain.process(&mut fd.scratch[..need]);
-        // Output routing: a square remap (swap / per-channel gain) maps the
-        // processed channels onto the same number of ports. A non-square matrix
-        // can't change the fixed port count here, so it's skipped — full
-        // up/downmix is the daemon-path backends' job (macOS), not the in-graph
-        // filter's. `route` copies when there's no matrix or it's identity.
-        // Only a true square remap at the live width is applied in-graph (the
-        // filter has a fixed `channels` ports in and out). Requiring BOTH dims to
-        // equal `channels` rejects a mismatched matrix that would misframe the
-        // buffer; the daemon also validates this at install time.
-        let route_applies =
-            matches!(&fd.chain.routing, Some(m) if m.in_ch() == channels && m.out_ch() == channels);
-        if route_applies {
-            fd.chain.route(&fd.scratch[..need], &mut fd.routed[..need]);
+        if fd.playback_fade.is_some() {
+            if fd.previous_scratch.len() < need {
+                fd.previous_scratch.resize(need, 0.0);
+                fd.previous_routed.resize(need, 0.0);
+            }
+            fd.previous_scratch[..need].copy_from_slice(&fd.scratch[..need]);
         }
-        let out_buf: &[f64] = if route_applies {
-            &fd.routed[..need]
-        } else {
-            &fd.scratch[..need]
-        };
+        let out_buf = render_chain(&mut fd.chain, &mut fd.scratch[..need], &mut fd.routed[..need], channels);
+        if let Some(fade) = &mut fd.playback_fade {
+            let previous = render_chain(
+                &mut fade.previous,
+                &mut fd.previous_scratch[..need],
+                &mut fd.previous_routed[..need],
+                channels,
+            );
+            fade.mix(out_buf, previous, channels);
+            if fade.position == fade.length {
+                fd.playback_fade = None;
+            }
+        }
+        if let Some(fade) = &mut fd.rate_fade {
+            fade.mix(out_buf, channels);
+            if fade.position == fade.length {
+                fd.rate_fade = None;
+            }
+        }
         let dt = t0.elapsed();
         let (out_peak, out_rms) = peak_rms(out_buf);
+        fd.signal_present = in_peak.max(out_peak) > 0.00001;
+        fd.last_output[..channels].copy_from_slice(&out_buf[need - channels..]);
         let right = usize::from(channels > 1);
         fd.monitor.record(fd.chain.sample_rate, n, |i| {
             [*ins[0].add(i), *ins[right].add(i), out_buf[i * channels] as f32, out_buf[i * channels + right] as f32]
@@ -1966,6 +2195,7 @@ unsafe extern "C" fn filter_process_cb(data: *mut c_void, position: *mut spa_io_
             in_rms,
             out_rms,
             stereo_rms: resonance_dsp::analysis::stereo_rms(out_buf, channels),
+            limiter_reduction_db: fd.chain.limiter.reduction_db,
             clip: out_peak >= 0.999,
             dsp_load: load,
             dsp_frame_us: dt.as_micros() as u32,
@@ -1983,9 +2213,9 @@ unsafe extern "C" fn filter_process_cb(data: *mut c_void, position: *mut spa_io_
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// #######################################################
 // Raw pw_properties helper (for pw_filter FFI only)
-// ─────────────────────────────────────────────────────────────────────────────
+// #######################################################
 
 /// SPA channel-position names for `channels` ports. Uses the standard WAVE-order
 /// names for 1..=8 (matching `resonance_ipc::default_channel_layout`, all valid
@@ -2019,6 +2249,22 @@ fn pw_props_raw(pairs: &[(&str, &str)]) -> *mut pw_sys::pw_properties {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn playback_fade_keeps_old_output_until_the_new_filter_is_primed() {
+        let mut fade = PlaybackFade {
+            previous: Box::new(ProcessorChain::builder().build()),
+            warmup_frames: 3,
+            position: 0,
+            length: 2,
+        };
+        let mut warming = [0.0; 4];
+        fade.mix(&mut warming, &[1.0, -1.0, 1.0, -1.0], 2);
+        assert_eq!(warming, [1.0, -1.0, 1.0, -1.0]);
+        let mut transition = [0.0, 0.0, 0.25, -0.25, 0.25, -0.25, 0.25, -0.25];
+        fade.mix(&mut transition, &[1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0], 2);
+        assert_eq!(transition, [1.0, -1.0, 1.0, -1.0, 0.625, -0.625, 0.25, -0.25]);
+    }
 
     #[test]
     fn echo_window_covers_only_recent_writes() {
@@ -2066,10 +2312,9 @@ mod tests {
 
     #[test]
     fn pair_ports_falls_back_positional_when_unlabeled() {
-        // Unlabeled destinations → positional (src id order ↔ dst index order).
+        // Unlabeled destinations → positional in source and destination ID order.
         let srcs = [port(2, "FR"), port(1, "FL")];
-        let dsts = [port(30, ""), port(31, "")];
-        // srcs sorted by id → [1, 2]; positional → 1→30, 2→31.
+        let dsts = [port(31, ""), port(30, "")];
         assert_eq!(pair_ports(&srcs, &dsts), vec![(1, 30), (2, 31)]);
     }
 

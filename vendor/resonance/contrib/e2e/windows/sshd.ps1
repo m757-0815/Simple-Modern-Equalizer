@@ -2,6 +2,11 @@
 # capability does not install on this evaluation image), authorise the e2e key, start audio.
 # Lives in the root of the answer-file ISO (found by drive letter); `cargo xtask e2e image
 # windows` substitutes @SSH_PUBKEY@.
+
+#######################################################
+# configure SSH access for the Windows test guest
+#######################################################
+
 $ErrorActionPreference = 'Continue'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12

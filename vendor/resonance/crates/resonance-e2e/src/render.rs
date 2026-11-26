@@ -6,6 +6,10 @@ use resonance_dsp::chain::ProcessorChain;
 use std::path::Path;
 use std::sync::Arc;
 
+// #######################################################
+// render the expected output from the exported DSP chain
+// #######################################################
+
 /// Render block size. IIR stages are block-size independent; FFT stages are
 /// covered by `resonance-dsp`'s `block_size_tests` (spike 4).
 pub const BLOCK_FRAMES: usize = 1024;

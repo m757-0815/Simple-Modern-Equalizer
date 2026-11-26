@@ -7,6 +7,10 @@
 use resonance_ipc::AppStream;
 use std::collections::HashMap;
 
+// #######################################################
+// match audio streams to apps and restore their volume
+// #######################################################
+
 /// Overlay daemon-side per-app control state (`key → (volume, muted)`) onto a
 /// freshly-enumerated app list. Used where the OS has no per-app volume to read
 /// back (macOS): enumeration reports defaults, and the values the user has set

@@ -254,7 +254,9 @@ fn blend(a: Color32, b: Color32, t: f32) -> Color32 {
     Color32::from_rgb(mix(a.r(), b.r()), mix(a.g(), b.g()), mix(a.b(), b.b()))
 }
 
-// ── Platform-native accent + light/dark detection ───────────────────────────
+// #######################################################
+// Platform-native accent + light/dark detection
+// #######################################################
 //
 // The "Native" theme adopts the host desktop's accent colour and light/dark
 // preference so the app reads as a native KDE / Windows / macOS app rather than
@@ -479,7 +481,9 @@ fn macos_is_dark() -> bool {
     defaults_global("AppleInterfaceStyle").is_some_and(|s| s.eq_ignore_ascii_case("Dark"))
 }
 
-// ── matugen / pywal palette loading ─────────────────────────────────────────
+// #######################################################
+// matugen / pywal palette loading
+// #######################################################
 
 /// Candidate colour files, newest-style first. pywal and most matugen templates
 /// write a JSON document with `special.background/foreground` and `colors.colorN`.

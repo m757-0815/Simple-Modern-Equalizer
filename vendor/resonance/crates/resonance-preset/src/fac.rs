@@ -1,6 +1,10 @@
 use crate::model::{ApoFilterType, EffectState, EqBand, FxEffects, Preset};
 use thiserror::Error;
 
+// #######################################################
+// read and write FxSound preset settings
+// #######################################################
+
 #[derive(Debug, Error)]
 pub enum FacError {
     #[error("missing magic header (expected 'CLASS1 : Effect Type')")]

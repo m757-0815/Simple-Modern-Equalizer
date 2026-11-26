@@ -10,6 +10,10 @@
 //! is only audibly meaningful when a specific integer target depth matters
 //! downstream — it is off by default.
 
+// #######################################################
+// dither output when reducing its bit depth
+// #######################################################
+
 /// A tiny, allocation-free xorshift64 PRNG. Deterministic (dither needs a
 /// signal-independent noise source, not cryptographic randomness).
 #[derive(Debug, Clone)]

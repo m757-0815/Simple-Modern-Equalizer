@@ -8,6 +8,10 @@
 use std::io::Write;
 use std::sync::Mutex;
 
+// #######################################################
+// write diagnostics from the Windows audio engine
+// #######################################################
+
 static LOCK: Mutex<()> = Mutex::new(());
 
 fn log_path() -> std::path::PathBuf {

@@ -1,3 +1,7 @@
+#######################################################
+# group the Resonance crates in one workspace
+#######################################################
+
 [workspace]
 resolver = "2"
 members = [
@@ -29,6 +33,11 @@ rust-version = "1.85"
 # actionable here. Lints that DO catch real problems (float_cmp, ptr alignment,
 # pass-by-value, …) are left ACTIVE and exempted only at justified call sites
 # with a `#[allow(…)]` + reason, so they keep working on new code.
+
+#######################################################
+# apply the same lint settings across the crates
+#######################################################
+
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }
 
@@ -63,6 +72,10 @@ fn_params_excessive_bools = "allow"
 # Clippy 1.99 nudge for `assert!(x.is_empty())` in tests; its suggested rewrite
 # (`assert_eq!(x, [] as [String; 0])`) reads worse than the original. Style only.
 assert_is_empty = "allow"
+
+#######################################################
+# share dependency versions across the workspace
+#######################################################
 
 [workspace.dependencies]
 # DSP
@@ -154,6 +167,10 @@ criterion = "0.7"
 ksni = "0.2"
 tray-icon = "0.19"
 winit = "0.30"
+
+#######################################################
+# select build profiles for packaging and audio tests
+#######################################################
 
 [profile.release]
 opt-level = "z"

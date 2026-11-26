@@ -3,6 +3,10 @@
 use crate::scenario::AllowedHop;
 use serde::Serialize;
 
+// #######################################################
+// track sample rates across the audio path
+// #######################################################
+
 /// Linux steps where Resonance itself (not PipeWire) would resample.
 pub const LINUX_RESONANCE_STEPS: &[&str] = &["capture->dsp"];
 

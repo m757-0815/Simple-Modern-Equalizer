@@ -10,6 +10,10 @@
 
 use libfuzzer_sys::fuzz_target;
 
+// #######################################################
+// exercise the Equalizer APO parser with arbitrary input
+// #######################################################
+
 fuzz_target!(|data: &[u8]| {
     let text = String::from_utf8_lossy(data);
     let _ = resonance_preset::apo::parse_apo(&text);

@@ -1,6 +1,11 @@
 # Build resonance_apo.dll: the Rust engine (staticlib, unwind profile, static CRT)
 # linked into the C++ COM/aggregation shell via MSVC. Run on Windows with the
 # VS2022 Build Tools + Windows SDK installed.
+
+#######################################################
+# link the Rust engine with the Windows audio effect shell
+#######################################################
+
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path "$PSScriptRoot\..\..").Path
 Set-Location $repo

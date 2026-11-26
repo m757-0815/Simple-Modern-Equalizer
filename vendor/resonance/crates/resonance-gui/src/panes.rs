@@ -7,6 +7,10 @@ use crate::card_layout::{CardCol, CardId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
+// #######################################################
+// remember which desktop panels are visible
+// #######################################################
+
 /// A hideable GUI panel. The five card panes map 1:1 to a `CardId`; `Bands` and
 /// `ReferenceBar` are the two fixed anchors that are not movable cards.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

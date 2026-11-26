@@ -19,6 +19,10 @@ use std::io;
 use std::path::PathBuf;
 use std::process::Command;
 
+// #######################################################
+// manage Windows per-user startup
+// #######################################################
+
 /// `Command` for a console program (`reg`, `taskkill`) that does NOT pop a
 /// console window. The GUI/daemon are `#![windows_subsystem = "windows"]`, so a
 /// console-subsystem child with no creation flags makes Windows allocate a fresh

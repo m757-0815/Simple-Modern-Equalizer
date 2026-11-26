@@ -7,6 +7,10 @@ use crate::chain::ProcessorChain;
 use crate::resample::StreamResampler;
 use crate::test_utils::{channel, fft_peak_hz, process_offline, sine, stereo_sine, thd_n_db};
 
+// #######################################################
+// check EQ behavior across sample rates
+// #######################################################
+
 /// Build a flat, all-effects-off passthrough chain at `rate`. The default chain
 /// is bit-perfect passthrough (see `chain::tests`), so any frequency shift in
 /// the output is attributable to the rate conversion alone.

@@ -5,6 +5,10 @@ use resonance_dsp::{
 };
 use serde::{Deserialize, Serialize};
 
+// #######################################################
+// represent presets and their channel settings
+// #######################################################
+
 /// `serde(default)` for `EqBand::channels`: a band with no stored channel target
 /// applies to every channel (`ChannelMask::ALL`'s bit pattern).
 fn all_channels_bits() -> u64 {

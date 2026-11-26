@@ -4,6 +4,10 @@ use crate::{Opts, repo_root, status};
 use anyhow::{Result, ensure};
 use std::process::{Command, ExitCode};
 
+// #######################################################
+// run the Linux audio suite inside a rootless container
+// #######################################################
+
 pub fn run(o: &Opts) -> Result<ExitCode> {
     let Opts {
         tier,

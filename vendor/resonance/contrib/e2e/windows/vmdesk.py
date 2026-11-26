@@ -12,6 +12,11 @@ events are normalised to 0..32767, so coordinates are scaled by the screenshot s
 This is real (emulated-hardware) input, so it reaches winit/egui windows where
 SendInput from a scheduled task does not.
 """
+
+#######################################################
+# operate the Windows test guest through its desktop console
+#######################################################
+
 import json, os, socket, subprocess, sys, tempfile, time
 
 CHARS = {' ': 'spc', '\\': 'backslash', '.': 'dot', ',': 'comma', '-': 'minus', '_': 'shift-minus',

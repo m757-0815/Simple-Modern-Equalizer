@@ -1,3 +1,7 @@
+#######################################################
+# build the Resonance terminal client
+#######################################################
+
 [package]
 name = "resonance-tui"
 description = "Ratatui TUI client for the Resonance daemon"

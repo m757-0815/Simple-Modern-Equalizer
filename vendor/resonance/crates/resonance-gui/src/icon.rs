@@ -53,7 +53,9 @@ fn curve_pts() -> Vec<(f32, f32)> {
     v
 }
 
-// ── raster (window / taskbar icon) ───────────────────────────────────────────
+// #######################################################
+// raster (window / taskbar icon)
+// #######################################################
 
 /// Rasterise the brand icon to RGBA at `size`×`size` for the OS window icon.
 pub fn rgba(size: usize) -> Vec<u8> {

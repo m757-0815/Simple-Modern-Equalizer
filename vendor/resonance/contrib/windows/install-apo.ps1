@@ -4,6 +4,11 @@
 #
 # Run elevated (the Inno Setup [Run] section does this). Parameters:
 #   -DllPath   full path to resonance_apo.dll (installed under {app})
+
+#######################################################
+# install and register the Windows audio effect
+#######################################################
+
 [CmdletBinding()]
 param(
   [Parameter(Mandatory = $true)] [string] $DllPath

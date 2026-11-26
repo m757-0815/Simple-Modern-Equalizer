@@ -12,6 +12,11 @@
 # (xdg-run/pipewire-0). The daemon (resonanced) captures/plays system audio over
 # it. There is no `--socket=pipewire` flatpak permission — that value makes
 # `flatpak build-finish` fail with "Unknown socket type".
+
+#######################################################
+# define the Flatpak package, permissions, and build inputs
+#######################################################
+
 app-id: io.github.ealtun21.Resonance
 runtime: org.freedesktop.Platform
 runtime-version: '24.08'

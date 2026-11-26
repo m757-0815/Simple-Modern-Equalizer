@@ -13,6 +13,10 @@
 
 use eframe::egui::{self, Color32, Pos2, Shape, Stroke, pos2};
 
+// #######################################################
+// draw vector icons for the desktop controls
+// #######################################################
+
 /// The icon set. Add a variant + a `match` arm in [`paths`] to grow it.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Icon {

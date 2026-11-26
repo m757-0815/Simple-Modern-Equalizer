@@ -53,7 +53,9 @@ pub fn log_freqs() -> Vec<f32> {
         .collect()
 }
 
-// ── Public result types ─────────────────────────────────────────────────────
+// #######################################################
+// Public result types
+// #######################################################
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum BandKind {
@@ -86,7 +88,9 @@ pub enum Smoothing {
     None,
 }
 
-// ── Filter type + biquad coefficients with analytic derivatives ─────────────
+// #######################################################
+// Filter type + biquad coefficients with analytic derivatives
+// #######################################################
 
 #[derive(Clone, Copy, PartialEq)]
 enum Type {
@@ -247,7 +251,9 @@ fn spectrum(t: Type, f0: f32, gain: f32, q: f32, f: &[f32], y: &mut [f32]) {
     }
 }
 
-// ── Initialization (adapted from jaakkopasanen/AutoEq) ──────────────────────
+// #######################################################
+// Initialization (adapted from jaakkopasanen/AutoEq)
+// #######################################################
 
 #[derive(Clone, Copy)]
 struct Lim {
@@ -458,7 +464,9 @@ fn init(t: Type, y: &[f32], f: &[f32], lim_f0: Lim, lim_gain: Lim, lim_q: Lim) -
     }
 }
 
-// ── Optimizer (AdaBelief) over a (log f, gain, bw) reparameterization ───────
+// #######################################################
+// Optimizer (AdaBelief) over a (log f, gain, bw) reparameterization
+// #######################################################
 
 fn q_to_bw(q: f32) -> f32 {
     2.0 / LN_2 * (0.5 / q).asinh()
@@ -767,7 +775,9 @@ fn autoeq_fit(
     );
 }
 
-// ── Preprocess: adaptive smoothing + treble roll-off ────────────────────────
+// #######################################################
+// Preprocess: adaptive smoothing + treble roll-off
+// #######################################################
 
 struct Smooth {
     f0: f32,
@@ -902,7 +912,9 @@ fn preprocess(f: &[f32], dst: &[f32], src: &[f32], smooth: Option<&Smooth>) -> V
     r
 }
 
-// ── Public entry point ──────────────────────────────────────────────────────
+// #######################################################
+// Public entry point
+// #######################################################
 
 /// Fit `n_filters` biquads (a low shelf, a high shelf, then peaking filters) so
 /// that `measured_db` EQ'd by them matches `target_db`. Both inputs are dB on

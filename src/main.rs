@@ -24,7 +24,7 @@ mod ui_tests;
 
 use config::Config;
 use plot_canvas::RasterSize;
-use presets::{DisplayPreferences, Preferences, Preset};
+use presets::{Crossfeed, DisplayPreferences, Preferences, Preset};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::{cell::RefCell, collections::VecDeque, fs, path::{Path, PathBuf}, rc::Rc, sync::mpsc, time::{Duration, Instant}};
 slint::include_modules!();
@@ -60,6 +60,10 @@ enum PresetLoad {
     Saved(usize),
     Apo(PathBuf),
 }
+
+// #######################################################
+// keep track of tuning, presets, and playback state
+// #######################################################
 
 struct App {
     cfg: Config,
@@ -187,13 +191,15 @@ impl App {
         let eq = ui.get_eq_plot_height().round().max(130.0) as i32;
         let live = ui.get_live_view_height().round().clamp(146.0, 420.0) as i32;
         let range = ui.get_eq_range_db().clamp(1, 24);
+        let scale = graph::FrequencyScale::from_index(ui.get_eq_frequency_scale_index());
         if eq != self.preferences.eq_plot_height || live != self.preferences.live_view_height() as i32
-            || range != self.preferences.eq_range_db
+            || range != self.preferences.eq_range_db || scale != self.preferences.display.eq_frequency_scale
         {
             let mut preferences = self.preferences.clone();
             preferences.eq_plot_height = eq;
             preferences.live_view_height = Some(live);
             preferences.eq_range_db = range;
+            preferences.display.eq_frequency_scale = scale;
             preferences.save(&self.directory)?;
             self.preferences = preferences;
         }
@@ -211,6 +217,63 @@ impl App {
         Ok(())
     }
 
+    fn crossfeed_output(&self) -> Option<&str> {
+        let format = self.format.as_ref()?;
+        format.output.as_deref().filter(|_| format.channels >= 2)
+    }
+
+    fn crossfeed(&self) -> Crossfeed {
+        self.crossfeed_output().and_then(|output| self.preferences.headphone_crossfeed.get(output))
+            .copied().unwrap_or_default()
+    }
+
+    fn room_output(&self) -> Option<&str> {
+        self.crossfeed_output().filter(|_| self.format.as_ref().is_some_and(|format| format.channels == 2))
+    }
+
+    fn room_percent(&self) -> u8 {
+        self.room_output().and_then(|output| self.preferences.headphone_room_percent.get(output))
+            .copied().unwrap_or_default().min(100)
+    }
+
+    fn playback_effects(&self) -> engine::PlaybackEffects {
+        engine::PlaybackEffects {
+            crossfeed: self.crossfeed(),
+            output: resonance_ipc::OutputEffects {
+                room_amount: f64::from(self.room_percent()) / 100.0,
+                limiter_enabled: self.preferences.limiter_enabled,
+            },
+        }
+    }
+
+    fn set_advanced_effects(&mut self, crossfeed: Crossfeed, room: u8, limiter: bool) -> bool {
+        let before = self.playback_effects();
+        if before.crossfeed != crossfeed && let Some(output) = self.crossfeed_output().map(str::to_owned) {
+            if crossfeed.percent() == 0 {
+                self.preferences.headphone_crossfeed.remove(&output);
+            } else {
+                self.preferences.headphone_crossfeed.insert(output, crossfeed);
+            }
+        }
+        if self.room_percent() != room && let Some(output) = self.room_output().map(str::to_owned) {
+            if room == 0 {
+                self.preferences.headphone_room_percent.remove(&output);
+            } else {
+                self.preferences.headphone_room_percent.insert(output, room.min(100));
+            }
+        }
+        self.preferences.limiter_enabled = limiter;
+
+        let after = self.playback_effects();
+        if before == after {
+            return false;
+        }
+        if let Some(format) = &self.format {
+            self.engine.submit(format, self.effective.clone(), self.preferences.phase_mode, after);
+        }
+        true
+    }
+
     fn apply_audio(&mut self) {
         // Keep the saved Standard bands intact while only Simple tone filters are active.
         let (rate, channels) = self.format.as_ref().map_or((48000.0, 2), |format| (format.sample_rate, format.channels));
@@ -222,7 +285,7 @@ impl App {
             if self.listening_to_a { a.unwrap_or(b) } else { b }
         };
         if let Some(format) = &self.format {
-            self.engine.submit(format, config.clone(), self.preferences.phase_mode);
+            self.engine.submit(format, config.clone(), self.preferences.phase_mode, self.playback_effects());
         }
         self.effective = config;
     }
@@ -396,6 +459,27 @@ fn band_row(cfg: &Config, index: usize, decimals: usize) -> BandRow {
     }
 }
 
+// #######################################################
+// draw the graph and update its appearance
+// #######################################################
+
+fn frequency_tick(frequency: u32, position: f32) -> FrequencyTick {
+    let label = match frequency {
+        20 => "20 Hz".into(),
+        20000 => "20 kHz".into(),
+        1000.. => format!("{}k", frequency / 1000).into(),
+        _ => frequency.to_string().into(),
+    };
+    FrequencyTick { position, label }
+}
+
+fn update_eq_frequency_ticks(ui: &MainWindow) {
+    let scale = graph::FrequencyScale::from_index(ui.get_eq_frequency_scale_index());
+    let ticks = scale.labeled_frequencies().into_iter()
+        .map(|frequency| frequency_tick(frequency, scale.x(f64::from(frequency)) as f32)).collect::<Vec<_>>();
+    ui.set_eq_frequency_ticks(Rc::new(VecModel::from(ticks)).into());
+}
+
 fn draw_eq_graph(ui: &MainWindow, app: &mut App) {
     if app.simple.active {
         return;
@@ -408,6 +492,7 @@ fn draw_eq_graph(ui: &MainWindow, app: &mut App) {
     let overlay = if ui.get_show_eq_spectrum() { &app.plot_spectrum[..] } else { &[] };
     app.plot.set_colors(app.preferences.colors);
     app.plot.set_range(ui.get_eq_range_db());
+    app.plot.set_frequency_scale(graph::FrequencyScale::from_index(ui.get_eq_frequency_scale_index()));
     app.plot.set_phase_mode(app.preferences.phase_mode);
     if let Some(frame) = app.plot.frame(&app.effective, overlay, rate, size) {
         ui.set_graph(slint::Image::from_rgba8(frame));
@@ -463,6 +548,18 @@ fn keep_widget_accent(ui: &MainWindow) -> slint::private_unstable_api::re_export
     tracker
 }
 
+// #######################################################
+// keep the controls aligned with the active tuning
+// #######################################################
+
+fn update_advanced_controls(ui: &MainWindow, app: &App) {
+    ui.set_crossfeed_available(app.crossfeed_output().is_some());
+    ui.set_crossfeed_percent(f32::from(app.crossfeed().percent()));
+    ui.set_room_available(app.room_output().is_some());
+    ui.set_room_percent(f32::from(app.room_percent()));
+    ui.set_limiter_enabled(app.preferences.limiter_enabled);
+}
+
 fn update_controls(ui: &MainWindow, app: &App) {
     let cfg = if app.listening_to_a { app.reference.as_ref().unwrap_or(&app.cfg) } else { &app.cfg };
     ui.set_graph_edited(app.edited && !app.listening_to_a);
@@ -473,6 +570,7 @@ fn update_controls(ui: &MainWindow, app: &App) {
     ui.set_balance(cfg.balance as f32);
     ui.set_balance_label(if cfg.balance.abs() < 0.005 { "Centered".into() }
         else { format!("{} {:.0}%", if cfg.balance < 0.0 { "Left" } else { "Right" }, cfg.balance.abs() * 100.0).into() });
+    update_advanced_controls(ui, app);
     ui.set_bypass(app.cfg.bypass);
     ui.set_show_live_view(app.cfg.show_live_view);
     ui.set_spline_eq(cfg.spline);
@@ -566,6 +664,10 @@ fn refresh_preset_names(ui: &MainWindow, app: &App) {
     ui.set_presets(text_model(app.presets.iter().map(|p| p.config.name.clone())));
 }
 
+// #######################################################
+// load and protect preset edits
+// #######################################################
+
 fn load_preset(ui: &MainWindow, app: &mut App, load: PresetLoad) {
     let previous = app.undo_state();
     match load {
@@ -638,6 +740,10 @@ fn resolve_preset_deletion(ui: &MainWindow, app: &mut App, confirmed: bool) -> R
         }
     }
 }
+
+// #######################################################
+// apply an edit and finish any pending curve fit
+// #######################################################
 
 fn commit(ui: &MainWindow, app: &mut App, candidate: Config) {
     commit_edit(ui, app, candidate, None);
@@ -751,6 +857,10 @@ fn edit_band(ui: &MainWindow, app: &mut App, index: i32, group: Option<EditGroup
     }
 }
 
+// #######################################################
+// find window bounds and load local settings
+// #######################################################
+
 fn fit_initial_window(window: &slint::Window) {
     use slint::winit_030::{EventResult, WinitWindowAccessor, winit::event::WindowEvent};
 
@@ -826,6 +936,10 @@ fn configure_color_picker(ui: &MainWindow) {
     });
 }
 
+// #######################################################
+// start the app and connect it to the sound engine
+// #######################################################
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Resolve desktop autostart before isolating the engine's config.
     #[cfg(target_os = "linux")]
@@ -894,17 +1008,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ui.set_license_text(include_str!("../LICENSE").into());
     apply_colors(&ui, app.borrow().preferences.colors);
     let _widget_accent = keep_widget_accent(&ui);
-    let frequency_ticks = live::frequency_ticks().map(|(frequency, position)| {
-        let label = match frequency {
-            20 => "20 Hz".into(),
-            20000 => "20 kHz".into(),
-            1000.. => format!("{}k", frequency / 1000).into(),
-            _ => frequency.to_string().into(),
-        };
-        FrequencyTick { position, label }
-    }).collect::<Vec<_>>();
+    let frequency_ticks = live::frequency_ticks().map(|(frequency, position)| frequency_tick(frequency, position))
+        .collect::<Vec<_>>();
     ui.set_live_frequency_ticks(Rc::new(VecModel::from(frequency_ticks)).into());
     ui.set_eq_range_db(app.borrow().preferences.eq_range_db());
+    ui.set_eq_frequency_scale_index(app.borrow().preferences.display.eq_frequency_scale.index());
+    update_eq_frequency_ticks(&ui);
     update_controls(&ui, &app.borrow());
     update_phase_setting(&ui, &app.borrow());
     draw_eq_graph(&ui, &mut app.borrow_mut());
@@ -916,7 +1025,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ui.set_live_mode(display.live_mode_index());
         ui.set_show_band_list(display.band_list);
         ui.set_show_levels(display.levels);
+        ui.set_show_advanced(display.advanced);
         ui.set_show_clipping(display.clipping);
+        ui.set_show_limiter_overlay(display.limiter_overlay);
         ui.set_show_preset_button(display.preset_button);
         ui.set_show_eq_spectrum(display.eq_spectrum);
         ui.set_simple_layout(state.simple.active);
@@ -937,6 +1048,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }});
         }};
     }
+
+    // #######################################################
+    // connect layout and EQ editor controls
+    // #######################################################
+
     on_ui_action!(on_change_layout, |w, a, simple| {
         if a.simple.active != simple {
             a.remember_current(None);
@@ -998,6 +1114,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         refresh_band_rows(&w, cfg);
         draw_eq_graph(&w, &mut a);
     });
+    on_ui_action!(on_change_eq_frequency_scale, |w, a, | {
+        a.drag_origin = None;
+        w.invoke_cancel_graph_drag();
+        update_eq_frequency_ticks(&w);
+        draw_eq_graph(&w, &mut a);
+    });
     on_ui_action!(on_change_tone, |w, a, bass, mid, treble, loudness| {
         if (a.simple.bass, a.simple.mid, a.simple.treble, a.simple.loudness) == (bass, mid, treble, loudness) {
             return;
@@ -1026,6 +1148,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         c.balance = f64::from(value);
         commit_edit(&w, &mut a, c, Some(EditGroup::Balance));
     });
+    {
+        let save_timer = slint::Timer::default();
+        let save_state = app.clone();
+        on_ui_action!(on_change_advanced_effects, |w, a, | {
+            let crossfeed = Crossfeed::new(w.get_crossfeed_percent().round() as u8);
+            let room = w.get_room_percent().round().clamp(0.0, 100.0) as u8;
+            let changed = a.set_advanced_effects(crossfeed, room, w.get_limiter_enabled());
+            update_advanced_controls(&w, &a);
+            if changed {
+                // Apply each slider change live and save after the slider settles.
+                let weak = w.as_weak();
+                let state = save_state.clone();
+                save_timer.start(slint::TimerMode::SingleShot, Duration::from_millis(250), move || {
+                    let a = state.borrow();
+                    if let Err(error) = a.preferences.save(&a.directory) && let Some(w) = weak.upgrade() {
+                        w.set_notice(error.into());
+                    }
+                });
+            }
+        });
+    }
     on_ui_action!(on_change_bypass, |w, a, value| {
         if a.cfg.bypass != value {
             a.remember_current(None);
@@ -1135,7 +1278,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         {
             return;
         }
-        let (frequency, gain) = a.plot.axis.band_values(x.into(), y.into());
+        let (frequency, gain) = a.plot.axis.band_values(a.plot.frequency_scale, x.into(), y.into());
         let mut config = a.cfg.clone();
         let index = config.bands.partition_point(|band| band.frequency_hz <= frequency);
         if config.add_peak(frequency, gain) {
@@ -1155,7 +1298,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             a.edit_group = None;
             let hit = graph::hit_band(&a.plot.dots, x.into(), y.into(), width.into(), height.into());
             a.drag_origin = hit.and_then(|index| a.cfg.bands.get(index).map(|band| {
-                graph::BandDrag::new(index, band).with_axis(a.plot.axis)
+                graph::BandDrag::new(index, band).with_axes(a.plot.axis, a.plot.frequency_scale)
             }));
             a.drag_origin.map_or(-1, |drag| drag.index as i32)
         });
@@ -1294,6 +1437,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         apply_and_update_controls(&w, &mut a);
     });
+
+    // #######################################################
+    // connect A/B comparison and file actions
+    // #######################################################
+
     on_ui_action!(on_capture_a, |w, a, | {
         a.reference = Some(a.cfg.clone());
         a.listening_to_a = false;
@@ -1351,6 +1499,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
+    // #######################################################
+    // refresh the UI from the audio and media workers
+    // #######################################################
+
     let weak = ui.as_weak(); let timer_state = app.clone();
     let live_meters = RefCell::new(live::LiveMeters::default());
     let monitor_plots = RefCell::new(monitor::Plots::default());
@@ -1358,6 +1510,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ui.set_has_now_playing(cfg!(any(windows, target_os = "linux")));
     let media_updates = now_playing::subscribe();
     let engine_state = app.borrow().engine.shared.clone();
+
+    // #######################################################
+    // connect the true-peak reset control
+    // #######################################################
+
+    let true_peak_display = Rc::new(RefCell::new(None::<live::TruePeakDisplay>));
+    ui.on_reset_true_peak({
+        let display = true_peak_display.clone();
+        let engine = engine_state.clone();
+        move || {
+            if let Some(display) = display.borrow_mut().as_mut() {
+                display.reset_maximum();
+            }
+            // Clear readings that were collected before the reset but have yet to be displayed.
+            let mut shared = engine.lock().unwrap();
+            shared.true_peaks = None;
+            shared.reset_true_peak = true;
+        }
+    });
     let mut stereo_levels = [-60.0; 2];
     let mut last_frame = Instant::now();
     let mut next_control = last_frame;
@@ -1365,6 +1536,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut next_media_refresh = last_frame;
     let mut display_interval = live::display_interval(None);
     let mut clip_until = Instant::now();
+    let mut limiter_until = None;
     let timer = Rc::new(slint::Timer::default());
     let timer_ref = Rc::downgrade(&timer);
     timer.start(slint::TimerMode::Repeated, display_interval, move || {
@@ -1384,12 +1556,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let show_eq_graph = visible && !a.simple.active;
         let eq_spectrum = show_eq_graph && w.get_show_eq_spectrum();
         let monitor_clipping = visible && w.get_show_clipping();
-        let (control, stereo_rms, waveform, monitor_signal) = {
+        let limiter_overlay = show_eq_graph && w.get_show_limiter_overlay()
+            && w.get_limiter_enabled() && !a.cfg.bypass;
+        let true_peak_active = show_live_view && mode == live::TRUE_PEAK_MODE;
+        let (control, stereo_rms, waveform, monitor_signal, true_peaks) = {
             let mut shared = engine_state.lock().unwrap();
-            shared.monitor_mode = (show_live_view && matches!(mode, live::BEFORE_AFTER_MODE | live::STEREO_FIELD_MODE))
+            shared.monitor_mode = (show_live_view && matches!(mode, live::BEFORE_AFTER_MODE | live::STEREO_FIELD_MODE | live::TRUE_PEAK_MODE))
                 .then_some(mode);
             shared.meter_capture_requested = cfg!(windows) && show_live_view && mode == live::STEREO_LEVEL_MODE;
             shared.scope_requested = show_live_view && mode == scope::MODE;
+            shared.limiter_overlay_requested = limiter_overlay;
+            if !limiter_overlay {
+                shared.limiter_hit = None;
+            }
             shared.spectrum_requested = if show_live_view && mode == live::BARS_MODE {
                 Some(spectrum::Resolution::Detailed)
             } else if eq_spectrum {
@@ -1420,17 +1599,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     (meters, engine::AudioFormat::from(state), outputs, state.preferred_output.clone(), label)
                 });
-                Some((snapshot, shared.status.clone(), std::mem::take(&mut shared.clipped), clip_spectrum))
+                Some((snapshot, shared.status.clone(), std::mem::take(&mut shared.clipped), clip_spectrum,
+                    shared.limiter_reduction_db, shared.limiter_hit.take()))
             } else { None };
             let waveform = if shared.scope_requested { shared.scope_samples.clone() } else { None };
             let signal = shared.monitor_signal.as_ref()
                 .filter(|signal| shared.monitor_mode.is_some_and(|mode| signal.has_mode(mode)))
                 .cloned();
-            (control, stereo_rms, waveform, signal)
+            (control, stereo_rms, waveform, signal, shared.true_peaks.take())
         };
-        if let Some((snapshot, status, clipped, clip_spectrum)) = control {
+        if let Some((snapshot, status, clipped, clip_spectrum, limiter_reduction, limiter_hit)) = control {
             let connection_changed = w.get_connected() != snapshot.is_some();
             w.set_status(status.into()); w.set_connected(snapshot.is_some());
+            let reduction = if w.get_connected() && w.get_limiter_enabled() && !a.cfg.bypass {
+                limiter_reduction.abs()
+            } else { 0.0 };
+            w.set_limiter_reduction_label(format!("{:.1} dB reduction", reduction).into());
+            if !limiter_overlay || !snapshot.as_ref().is_some_and(|(_, format, ..)| a.format.as_ref() == Some(format)) {
+                limiter_until = None;
+            } else if let Some(hit) = limiter_hit {
+                limiter_until = Some(hit.time + Duration::from_millis(900));
+                w.set_limiter_graph_label(format!("Limiter −{:.1} dB", hit.reduction_db).into());
+                let regions = hit.regions.into_iter().map(|(start, end)| FrequencyRegion { start, end }).collect::<Vec<_>>();
+                w.set_limiter_regions(Rc::new(VecModel::from(regions)).into());
+            }
+            if limiter_until.is_none_or(|until| now >= until) && w.get_limiter_graph_label() != "" {
+                w.set_limiter_graph_label("".into());
+                w.set_limiter_regions(ModelRc::default());
+            }
             if let Some((meters, format, ..)) = &snapshot {
                 if a.format.as_ref() != Some(format) {
                     loudness.clear();
@@ -1446,7 +1642,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if clipped {
                     clip_until = Instant::now() + Duration::from_secs(2);
                     if monitor_clipping {
-                        let regions = spectrum::clip_regions(&clip_spectrum);
+                        let regions = spectrum::dominant_regions(&clip_spectrum);
                         if a.simple.active {
                             let [bass, mid, treble] = simple::clipping_controls(&regions);
                             w.set_simple_clipping(ToneClipping { bass, mid, treble });
@@ -1509,7 +1705,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 });
             }
         }
-        if show_live_view && mode == live::STEREO_LEVEL_MODE {
+        // A new visit to True Peak starts a new maximum.
+        if !true_peak_active {
+            true_peak_display.borrow_mut().take();
+        }
+        if true_peak_active {
+            let mut display = true_peak_display.borrow_mut();
+            let ([left, right], [max_left, max_right]) = display.get_or_insert_with(live::TruePeakDisplay::default)
+                .update(true_peaks, elapsed);
+            w.set_true_peak_left(left);
+            w.set_true_peak_right(right);
+            w.set_true_peak_max_left(max_left);
+            w.set_true_peak_max_right(max_right);
+        } else if show_live_view && mode == live::STEREO_LEVEL_MODE {
             let [left, right] = live::smooth_stereo(&mut stereo_levels, stereo_rms, elapsed);
             w.set_left_level_dbfs(left);
             w.set_right_level_dbfs(right);
@@ -1579,9 +1787,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         live_mode: ui.get_live_mode() + 2,
         band_list: ui.get_show_band_list(),
         levels: ui.get_show_levels(),
+        advanced: ui.get_show_advanced(),
         clipping: ui.get_show_clipping(),
+        limiter_overlay: ui.get_show_limiter_overlay(),
         preset_button: ui.get_show_preset_button(),
         eq_spectrum: ui.get_show_eq_spectrum(),
+        eq_frequency_scale: graph::FrequencyScale::from_index(ui.get_eq_frequency_scale_index()),
     };
     a.save_graph_view(&ui)?;
     a.preferences.save(&a.directory)?;
@@ -1591,6 +1802,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn headphone_effects_are_saved_for_each_output() {
+        let mut app = app_for_preset_tests(Config::default());
+        let mut format = engine::AudioFormat { channels: 2, sample_rate: 48_000.0, output: Some("Headphones".into()) };
+        app.format = Some(format.clone());
+        assert_eq!(app.crossfeed().percent(), 0);
+        assert_eq!(app.room_percent(), 0);
+        assert!(!app.preferences.limiter_enabled);
+        assert!(app.set_advanced_effects(Crossfeed::new(37), 44, true));
+        app.preferences.save(&app.directory).unwrap();
+        let saved: Preferences = serde_json::from_str(&storage::read_text(&app.directory.join("preferences.json")).unwrap()).unwrap();
+        assert_eq!(saved.headphone_crossfeed["Headphones"].percent(), 37);
+        assert_eq!(saved.headphone_room_percent["Headphones"], 44);
+        assert!(saved.limiter_enabled);
+
+        format.output = Some("HDMI".into());
+        app.format = Some(format.clone());
+        assert_eq!(app.crossfeed().percent(), 0);
+        assert_eq!(app.room_percent(), 0);
+        assert!(app.playback_effects().output.limiter_enabled);
+        format.output = Some("Headphones".into());
+        format.channels = 1;
+        app.format = Some(format.clone());
+        assert_eq!(app.crossfeed().percent(), 0);
+        assert!(!app.set_advanced_effects(Crossfeed::new(25), 100, true));
+        format.channels = 2;
+        app.format = Some(format);
+        assert_eq!(app.crossfeed().percent(), 37);
+        assert_eq!(app.room_percent(), 44);
+        assert!(app.set_advanced_effects(Crossfeed::default(), 0, false));
+        assert!(app.preferences.headphone_crossfeed.is_empty());
+        assert!(app.preferences.headphone_room_percent.is_empty());
+        fs::remove_dir_all(&app.directory).unwrap();
+    }
 
     fn app_for_preset_tests(standard: Config) -> App {
         let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();

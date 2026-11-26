@@ -15,6 +15,10 @@ use clap::{Parser, ValueEnum};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
+// #######################################################
+// select the platform for the live audio suite
+// #######################################################
+
 mod linux;
 mod macos;
 mod vm;

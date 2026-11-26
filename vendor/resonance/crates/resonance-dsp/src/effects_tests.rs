@@ -7,7 +7,9 @@ use std::f64::consts::PI;
 
 const SR: f64 = 48000.0;
 
-// ── Spectral helpers ──────────────────────────────────────────────────────────
+// #######################################################
+// Spectral helpers
+// #######################################################
 
 fn spectrum(signal: &[f64]) -> Vec<f64> {
     let n = signal.len();
@@ -449,9 +451,9 @@ fn dynamic_boost_zero_intensity_passthrough() {
     assert_eq!(buf, input);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// #######################################################
 // BASS BOOST — peaking bell at 90 Hz, Q 2.5, gain = intensity·15 dB, bipolar.
-// ─────────────────────────────────────────────────────────────────────────────
+// #######################################################
 
 fn effect_gain_db(fx: &mut dyn Effect, freq: f64) -> f64 {
     let n = (SR * 0.4) as usize;
@@ -563,6 +565,29 @@ fn crossfeed_bypass_at_zero_is_bit_exact() {
     let mut buf = input.clone();
     fx.process(&mut buf, 2);
     assert_eq!(buf, input);
+}
+
+#[test]
+fn crossfeed_ramps_live_changes_and_returns_to_exact_passthrough() {
+    for rate in [48_000.0, 192_000.0] {
+        let mut fx = CrossfeedEffect::new(2, rate);
+        let dry = [0.75, 0.0];
+        let mut before = dry;
+        fx.process(&mut before, 2);
+        fx.set_intensity(1.0);
+        let frames = (rate * 0.012) as usize;
+        let mut enabled = dry.repeat(frames);
+        fx.process(&mut enabled, 2);
+        assert_eq!(&enabled[..2], &dry);
+        assert!((enabled[3] - enabled[1]).abs() < 0.001);
+        assert!((enabled[enabled.len() - 1] - 0.25).abs() < 0.001);
+
+        fx.set_enabled(false);
+        let mut disabled = dry.repeat(frames);
+        fx.process(&mut disabled, 2);
+        assert!((disabled[1] - 0.25).abs() < 0.001);
+        assert_eq!(&disabled[disabled.len() - 2..], &dry);
+    }
 }
 
 #[test]

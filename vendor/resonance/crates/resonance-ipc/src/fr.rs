@@ -115,7 +115,9 @@ pub fn curve_points_range(
         .collect()
 }
 
-// ── Biquad magnitude response ─────────────────────────────────────────────
+// #######################################################
+// Biquad magnitude response
+// #######################################################
 
 fn biquad_mag_db(c: &BiquadCoeffs, freq: f64, sr: f64) -> f64 {
     use std::f64::consts::PI;

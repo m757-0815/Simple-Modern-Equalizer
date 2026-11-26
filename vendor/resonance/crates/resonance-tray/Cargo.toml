@@ -1,4 +1,9 @@
 # crates/resonance-tray/Cargo.toml
+
+#######################################################
+# build the system tray client for each platform
+#######################################################
+
 [package]
 name = "resonance-tray"
 version.workspace = true

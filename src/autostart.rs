@@ -4,6 +4,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
+// #######################################################
+// manage the desktop login entry
+// #######################################################
+
 pub fn enabled(entry: &Path) -> bool {
     storage::read_text(entry).is_ok_and(|text| {
         !text
@@ -40,6 +44,10 @@ pub fn set_enabled(entry: &Path, enabled: bool) -> io::Result<()> {
     }
     storage::write_text(entry, desktop.as_bytes())
 }
+
+// #######################################################
+// write a launcher for the current executable
+// #######################################################
 
 fn desktop_entry(executable: &Path) -> io::Result<String> {
     let path = executable

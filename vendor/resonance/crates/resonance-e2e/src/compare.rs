@@ -4,6 +4,10 @@ use resonance_dsp::analysis::best_integer_lag;
 use serde::{Deserialize, Serialize};
 use std::ops::Range;
 
+// #######################################################
+// align and compare captured audio to the reference
+// #######################################################
+
 /// How a scenario's recording must match its offline render.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
 #[serde(from = "CompareToml")]

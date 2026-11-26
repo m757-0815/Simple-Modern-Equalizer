@@ -21,6 +21,10 @@ use rustfft::{FftPlanner, num_complex::Complex};
 use crate::log;
 use crate::state::{self, ChainSnapshot, SharedFile, TELEMETRY_BINS, TelemetrySnapshot};
 
+// #######################################################
+// expose the Rust audio engine to the Windows APO shell
+// #######################################################
+
 const RING: usize = 4096;
 const FFT_SIZE: usize = 4096;
 const FREQ_MIN: f64 = 20.0;
@@ -49,6 +53,7 @@ struct Shared {
     in_rms: AtomicU32,
     out_rms: AtomicU32,
     stereo_rms: [AtomicU32; 2],
+    limiter_reduction_db: AtomicU32,
     /// Lock-free "latest samples" ring (mono mix) the RT thread fills and the
     /// worker reads for the FFT. `AtomicU32` holds f32 bits.
     ring: [AtomicU32; RING],
@@ -320,7 +325,7 @@ fn worker_loop(weak: Weak<Shared>, path: PathBuf) {
             if let Ok(mut g) = shared.state.try_lock() {
                 if let Some(l) = g.as_mut() {
                     if l.chain.enabled {
-                        l.chain.enabled = false;
+                        l.chain.set_power(false);
                         crate::log::line("daemon heartbeat stale - forcing bypass");
                     }
                 }
@@ -363,6 +368,7 @@ fn worker_loop(weak: Weak<Shared>, path: PathBuf) {
             in_rms: level(&shared.in_rms),
             out_rms: level(&shared.out_rms),
             stereo_rms: shared.stereo_rms.each_ref().map(level),
+            limiter_reduction_db: level(&shared.limiter_reduction_db),
             sample_rate: f64::from_bits(shared.sample_rate_bits.load(Ordering::Relaxed)) as f32,
             spectrum: bins,
             channels: shared.channels.load(Ordering::Relaxed) as u32,
@@ -447,6 +453,7 @@ pub extern "C" fn resonance_apo_create() -> *mut ApoEngine {
             in_rms: AtomicU32::new(0),
             out_rms: AtomicU32::new(0),
             stereo_rms: [AtomicU32::new(0), AtomicU32::new(0)],
+            limiter_reduction_db: AtomicU32::new(0),
             ring: core::array::from_fn(|_| AtomicU32::new(0)),
             ring_pos: AtomicUsize::new(0),
             proc_calls: AtomicU64::new(0),
@@ -595,6 +602,8 @@ pub extern "C" fn resonance_apo_process(
             for (meter, rms) in eng.shared.stereo_rms.iter().zip(stereo_rms) {
                 meter.store(rms.to_bits(), Ordering::Relaxed);
             }
+            let reduction = if l.chain.enabled { l.chain.limiter.reduction_db } else { 0.0 };
+            eng.shared.limiter_reduction_db.store(reduction.to_bits(), Ordering::Relaxed);
             // Feed the spectrum ring with the mono mix of the output.
             let frames_n = n / ch;
             let mut pos = eng.shared.ring_pos.load(Ordering::Relaxed);

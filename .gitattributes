@@ -1,3 +1,7 @@
+#######################################################
+# keep text file line endings consistent across platforms
+#######################################################
+
 * text=auto
 *.sh text eol=lf
 *.desktop text eol=lf

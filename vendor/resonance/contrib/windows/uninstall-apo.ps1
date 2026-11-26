@@ -1,6 +1,11 @@
 # Remove the Resonance APO: restore each render endpoint's original effect
 # slots, unregister the COM class + APO catalog, and clear the signature-check
 # override. Run elevated (Inno Setup [UninstallRun]).
+
+#######################################################
+# detach and unregister the Windows audio effect
+#######################################################
+
 $ErrorActionPreference = 'Continue'
 
 # Stop only the daemon and desktop app installed alongside this script.

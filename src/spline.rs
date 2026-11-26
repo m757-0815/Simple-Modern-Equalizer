@@ -1,6 +1,10 @@
 use crate::config::Band;
 use rustfft::{FftPlanner, num_complex::Complex};
 
+// #######################################################
+// evaluate the spline on a logarithmic frequency axis
+// #######################################################
+
 // A 20 px handle needs this fraction of the log-frequency graph at minimum window width.
 pub const MIN_POINT_GAP: f64 = 0.028;
 
@@ -21,6 +25,10 @@ pub fn gain_at(points: &[Band], frequency: f64) -> f64 {
         }
     }
 }
+
+// #######################################################
+// export the spline correction as an impulse response
+// #######################################################
 
 pub fn kernel_wav(points: &[Band], sample_rate: u32) -> Vec<u8> {
     wav(&kernel(points, sample_rate), sample_rate)

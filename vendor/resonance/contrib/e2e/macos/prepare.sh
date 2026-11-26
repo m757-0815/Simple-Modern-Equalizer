@@ -2,6 +2,11 @@
 # Per-run preparation inside the macOS guest: build the daemon and the agent, wrap the
 # daemon in a minimal signed Resonance.app, sign the agent with the same identity,
 # install the two LaunchAgents. Log: ~/prepare.log. Prints PREPARE-DONE last.
+
+#######################################################
+# stage the audio test tools in the macOS guest
+#######################################################
+
 set -euo pipefail
 export PATH="$HOME/.cargo/bin:$PATH"
 SRC="${SRC:-$HOME/resonance}"

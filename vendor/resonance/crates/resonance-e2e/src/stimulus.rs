@@ -3,6 +3,10 @@
 use std::f64::consts::PI;
 use std::ops::Range;
 
+// #######################################################
+// generate repeatable test signals and latency chirps
+// #######################################################
+
 /// Pilot tone mixed into every stimulus channel; resampling and event
 /// scenarios read their pitch check from it.
 pub const PILOT_HZ: f64 = 997.0;

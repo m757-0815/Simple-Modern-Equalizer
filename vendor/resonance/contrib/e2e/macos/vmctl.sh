@@ -2,6 +2,11 @@
 # Drive a macOS e2e guest from the host: boot an overlay, run ssh, take screenshots, type keys, click.
 # Everything lives in $LC_DIR (default ~/.cache/resonance-e2e/macos/lifecycle); the base image is only
 # ever a backing file. Usage: vmctl.sh reset|boot|ssh|script|scp|shot|key|type|click|sync|lifecycle|kill (see README.md)
+
+#######################################################
+# manage the macOS audio test guest
+#######################################################
+
 set -eu
 H=${RESONANCE_E2E_HOME:-$HOME/.cache/resonance-e2e}
 LC_DIR=${LC_DIR:-$H/macos/lifecycle}

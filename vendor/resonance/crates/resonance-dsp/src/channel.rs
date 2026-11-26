@@ -11,6 +11,10 @@
 //! permutation, channel duplication / drop, and up/downmix — i.e. routing any
 //! input channel to any output channel. `apply` is allocation-free.
 
+// #######################################################
+// select and route channels independently
+// #######################################################
+
 /// Bitset over channel indices. Supports up to 64 channels, far beyond any real
 /// device. [`ChannelMask::ALL`] matches every channel regardless of the live
 /// channel count, so a band defined before the device layout is known still

@@ -6,6 +6,10 @@ use crate::ui::kit;
 use eframe::egui;
 use resonance_ipc::{Command, DaemonState, FxEffectId};
 
+// #######################################################
+// draw the toggles and intensity controls for playback effects
+// #######################################################
+
 impl GuiApp {
     /// Demoted `FxSound` effects (mockup `.fx`): each effect is a two-line block —
     /// `[toggle]  Name ………… +NN%` over a full-width thin slider — so the EQ stays

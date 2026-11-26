@@ -1,3 +1,7 @@
+#######################################################
+# build the Resonance desktop client
+#######################################################
+
 [package]
 name = "resonance-gui"
 description = "GUI client for the Resonance daemon"

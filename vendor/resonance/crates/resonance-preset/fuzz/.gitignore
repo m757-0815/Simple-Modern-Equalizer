@@ -1,3 +1,7 @@
+#######################################################
+# ignore the generated preset fuzzing builds
+#######################################################
+
 /target
 /coverage
 /Cargo.lock

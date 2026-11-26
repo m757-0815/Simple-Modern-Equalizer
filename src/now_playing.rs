@@ -9,6 +9,10 @@ mod platform;
 #[path = "now_playing/linux.rs"]
 mod platform;
 
+// #######################################################
+// deliver the current track from the system media session
+// #######################################################
+
 pub struct Track {
     pub title: String,
     pub artist: String,

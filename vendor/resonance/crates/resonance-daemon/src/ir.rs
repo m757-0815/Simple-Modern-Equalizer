@@ -8,6 +8,10 @@
 
 use resonance_dsp::convolution::IrData;
 
+// #######################################################
+// decode WAV files for convolution
+// #######################################################
+
 /// Read + decode a WAV impulse response. Returns the de-interleaved samples at
 /// the file's native rate; the display name is the file stem.
 pub fn load_wav_ir(path: &str) -> Result<IrData, String> {

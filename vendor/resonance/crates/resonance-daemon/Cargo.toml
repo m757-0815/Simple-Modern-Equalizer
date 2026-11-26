@@ -1,3 +1,7 @@
+#######################################################
+# build the daemon with its platform audio backend
+#######################################################
+
 [package]
 name = "resonance-daemon"
 description = "PipeWire filter node daemon with Unix socket IPC server"

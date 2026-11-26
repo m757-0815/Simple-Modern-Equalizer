@@ -10,6 +10,10 @@
 use anyhow::{Result, bail};
 use std::path::PathBuf;
 
+// #######################################################
+// fetch and save headphone correction presets
+// #######################################################
+
 const RESULTS_BASE: &str = "https://raw.githubusercontent.com/jaakkopasanen/AutoEq/master/results";
 
 /// One parsed INDEX.md entry. Paths stay URL-encoded for building download URLs;

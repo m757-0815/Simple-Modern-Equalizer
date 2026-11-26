@@ -1,3 +1,7 @@
+#######################################################
+# send a mouse click to the prototype guest console
+#######################################################
+
 import socket,sys,json,time
 x,y=int(sys.argv[1]),int(sys.argv[2]); n=int(sys.argv[3]) if len(sys.argv)>3 else 1
 s=socket.socket(socket.AF_UNIX); s.connect('/tmp/mac-qmp.sock'); f=s.makefile('rw')

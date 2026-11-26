@@ -2,6 +2,10 @@ use super::Track;
 use std::{collections::HashMap, time::Duration};
 use zbus::{blocking::{Connection, Proxy, connection::Builder}, zvariant::OwnedValue};
 
+// #######################################################
+// find active media players over D-Bus
+// #######################################################
+
 #[derive(Default)]
 pub(super) struct Source {
     connection: Option<Connection>,
@@ -32,6 +36,10 @@ fn current_track(connection: &Connection) -> zbus::Result<Option<Track>> {
     Ok(players.iter().filter(|name| name.starts_with("org.mpris.MediaPlayer2."))
         .find_map(|name| read_track(connection, name)))
 }
+
+// #######################################################
+// read the title and artist from the selected player
+// #######################################################
 
 fn read_track(connection: &Connection, name: &str) -> Option<Track> {
     let player = Proxy::new(connection, name, "/org/mpris/MediaPlayer2", "org.freedesktop.DBus.Properties").ok()?;

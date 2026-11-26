@@ -1,5 +1,10 @@
 # Set the shared-mode format of the render endpoint whose name contains $Name.
 # usage: setfmt.ps1 -Ch 8 -Rate 48000 [-Name Scream]   (no-op if already set)
+
+#######################################################
+# set the channel count and sample rate on the test endpoint
+#######################################################
+
 param([int]$Ch, [int]$Rate, [string]$Name = "Scream")
 $Mask = switch ($Ch) { 1 {4} 2 {3} 4 {0x33} 6 {0x3F} 8 {0x63F} default { throw "no speaker mask for $Ch channels" } }
 $renderRoot = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Render'

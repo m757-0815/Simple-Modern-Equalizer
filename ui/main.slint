@@ -11,6 +11,10 @@ global Graphite {
     out property <length> control-gap: 8px;
 }
 
+// #######################################################
+// define the shared panels and appearance
+// #######################################################
+
 component PanelHeading inherits Text {
     accessible-label: self.text;
     color: Graphite.text;
@@ -53,6 +57,10 @@ component ColorSwatch inherits Rectangle {
     }
     Tooltip { text: @markdown("\{root.hint}"); }
 }
+
+// #######################################################
+// edit the accent color
+// #######################################################
 
 component ColorField inherits VerticalLayout {
     in property <string> label;
@@ -180,6 +188,10 @@ component ColorField inherits VerticalLayout {
     }
 }
 
+// #######################################################
+// pass graph and playback data between Rust and Slint
+// #######################################################
+
 export struct BandRow {
     frequency: string,
     gain: float,
@@ -221,6 +233,10 @@ export struct PlaybackDetails {
     title: string,
     artist: string,
 }
+
+// #######################################################
+// define reusable graph and control widgets
+// #######################################################
 
 component PlotArea inherits Rectangle {
     callback extent-changed(PlotExtent);
@@ -295,6 +311,30 @@ component Choice inherits Rectangle {
     }
 }
 
+component EffectSlider inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> hint;
+    in property <bool> enabled;
+    in-out property <float> percent <=> slider.value;
+    callback changed();
+    spacing: 12px;
+    cross-axis-alignment: center;
+    Label { text: root.label; width: 170px; }
+    slider := Slider {
+        horizontal-stretch: 1;
+        accessible-label: root.label;
+        minimum: 0; maximum: 100; step: 1;
+        enabled: root.enabled;
+        changed => { root.changed(); }
+        Tooltip { text: @markdown("\{root.hint}"); }
+    }
+    Label {
+        width: 48px;
+        horizontal-alignment: right;
+        text: round(root.percent) + "%";
+    }
+}
+
 component ResizeGrip inherits Rectangle {
     in-out property <float> panel-height;
     in property <float> minimum;
@@ -345,6 +385,10 @@ component ResizeGrip inherits Rectangle {
         }
     }
 }
+
+// #######################################################
+// draw and edit the Simple tone controls
+// #######################################################
 
 component ToneFader inherits Rectangle {
     in property <string> label;
@@ -542,6 +586,10 @@ component PreampControls inherits VerticalLayout {
     }
 }
 
+// #######################################################
+// assemble the main window and its actions
+// #######################################################
+
 export component MainWindow inherits Window {
     title: "Simple Modern Equalizer";
     icon: Appearance.app-icon;
@@ -603,6 +651,7 @@ export component MainWindow inherits Window {
     in-out property <bool> show-band-list: true;
     in property <bool> spline-eq;
     in-out property <bool> show-levels: true;
+    in-out property <bool> show-advanced: false;
     in-out property <bool> show-clipping: true;
     in-out property <bool> show-preset-button: true;
     in-out property <bool> show-eq-spectrum;
@@ -638,6 +687,12 @@ export component MainWindow inherits Window {
     in property <string> scope-status: "Waiting for output capture";
     in property <image> graph;
     in-out property <int> eq-range-db: 24;
+    in-out property <int> eq-frequency-scale-index;
+    in property <[FrequencyTick]> eq-frequency-ticks;
+    pure function eq-frequency-position(log-position: float) -> float {
+        // The spectrum analyzer reports its ranges on the logarithmic axis.
+        return root.eq-frequency-scale-index == 1 ? (pow(1000, log-position) - 1) / 999 : log-position;
+    }
     in property <string> eq-bottom-db: "-24";
     in property <string> eq-top-db: "+24";
     in property <float> eq-zero-position: 0.5;
@@ -650,6 +705,15 @@ export component MainWindow inherits Window {
     in-out property <int> live-mode: 0;
     in property <float> left-level-dbfs: -1000;
     in property <float> right-level-dbfs: -1000;
+    in property <float> true-peak-left: -1000;
+    in property <float> true-peak-right: -1000;
+    in property <float> true-peak-max-left: -1000;
+    in property <float> true-peak-max-right: -1000;
+    private property <bool> true-peak-selected: root.live-mode == 6;
+    callback reset-true-peak();
+    function peak-label(level: float) -> string {
+        return level <= -1000 ? "−∞" : (level > 0 ? "+" : "") + round(level * 10) / 10;
+    }
     in-out property <float> live-view-height: 216;
     in-out property <float> eq-plot-height: 260;
     in-out property <bool> simple-layout;
@@ -657,10 +721,24 @@ export component MainWindow inherits Window {
     in-out property <float> simple-mid;
     in-out property <float> simple-treble;
     in-out property <bool> simple-loudness;
+    in-out property <float> crossfeed-percent;
+    in property <bool> crossfeed-available;
+    in-out property <float> room-percent;
+    in property <bool> room-available;
+    in-out property <bool> limiter-enabled;
+    in property <string> limiter-reduction-label: "0.0 dB reduction";
+    in-out property <bool> show-limiter-overlay;
+    in property <string> limiter-graph-label;
+    in property <[FrequencyRegion]> limiter-regions;
+    private property <color> limiter-color: #F2B35C;
+    private property <bool> show-limiter-hit: root.show-limiter-overlay && root.limiter-enabled
+        && root.connected && !root.bypass && root.limiter-graph-label != "";
     callback change-layout(bool);
     callback change-eq-range();
+    callback change-eq-frequency-scale();
     callback save-graph-view();
     callback change-tone(float, float, float, bool);
+    callback change-advanced-effects();
     callback choose-preset(int);
     callback resolve-preset-load(bool);
     private property <string> preset-load-name;
@@ -761,6 +839,11 @@ export component MainWindow inherits Window {
             }
             return reject;
         }
+
+    // #######################################################
+    // lay out the monitor and EQ editors
+    // #######################################################
+
     window-scroll := ScrollView {
         y: root.simple-layout ? top-controls.height + root.page-inset : 0px;
         height: parent.height - self.y;
@@ -794,15 +877,16 @@ export component MainWindow inherits Window {
                         text: root.signal;
                     }
                     Rectangle { horizontal-stretch: 1; }
-                    if !root.narrow: GraphLabel {
+                    if !root.narrow || root.true-peak-selected: GraphLabel {
                         text: root.live-mode == 1 ? "MONO OUTPUT · ±1 FULL SCALE"
                             : root.live-mode == 2 ? "STEREO LEVEL · dBFS RMS"
                             : root.live-mode == 3 ? "−66 TO 0 dBFS"
                             : root.live-mode == 4 ? "OUTPUT RMS · −60 TO 0 dBFS"
-                            : root.live-mode == 5 ? root.monitor-status : "RELATIVE LEVEL";
+                            : root.live-mode == 5 ? root.monitor-status
+                            : root.true-peak-selected ? "dBTP" : "RELATIVE LEVEL";
                         horizontal-alignment: right;
                     }
-                    if root.show-clipping && !root.narrow: GraphLabel {
+                    if root.show-clipping && !root.narrow && !root.true-peak-selected: GraphLabel {
                         text: "CLIP";
                         color: root.clipping ? Appearance.accent : Graphite.secondary;
                         accessible-label: root.clipping ? "Output peak reached full scale" : "No recent clipping";
@@ -810,7 +894,7 @@ export component MainWindow inherits Window {
                     Choice {
                         width: 182px;
                         accessible-name: "Live display";
-                        model: ["Bars", "Oscilloscope", "Stereo Level", "Before / After EQ", "Loudness History", "Stereo Field"];
+                        model: ["Bars", "Oscilloscope", "Stereo Level", "Before / After EQ", "Loudness History", "Stereo Field", "True Peak"];
                         current-index <=> root.live-mode;
                         Tooltip { text: @markdown("Choose the visualization for Live Monitor."); }
                     }
@@ -818,21 +902,26 @@ export component MainWindow inherits Window {
                 live-plot := PlotArea {
                     border-radius: 6px; clip: true; vertical-stretch: 1;
                     extent-changed(extent) => { root.live-plot-extent = extent; }
-                    if root.live-mode != 2: Image {
+                    if root.live-mode != 2 && !root.true-peak-selected: Image {
                         width: parent.width; height: parent.height;
                         source: root.live-mode >= 3 ? root.monitor-image : root.live-image;
                         image-fit: fill;
                     }
-                    if root.live-mode >= 3 && root.monitor-status != "" && root.live-mode != 5: GraphLabel {
+                    if (root.live-mode == 3 || root.live-mode == 4) && root.monitor-status != "": GraphLabel {
                         x: 12px; y: 7px;
                         text: root.monitor-status;
                     }
-                    if root.live-mode == 2: VerticalLayout {
+                    // #######################################################
+                    // draw the stereo meters
+                    // #######################################################
+
+                    if root.live-mode == 2 || root.true-peak-selected: VerticalLayout {
                         padding-left: 12px;
                         padding-right: 12px;
                         spacing: 5px;
                         alignment: center;
-                        for level[index] in [root.left-level-dbfs, root.right-level-dbfs]: HorizontalLayout {
+                        for level[index] in [root.true-peak-selected ? root.true-peak-left : root.left-level-dbfs,
+                                             root.true-peak-selected ? root.true-peak-right : root.right-level-dbfs]: HorizontalLayout {
                             height: 14px;
                             spacing: 8px;
                             cross-axis-alignment: center;
@@ -845,20 +934,29 @@ export component MainWindow inherits Window {
                                 clip: true;
                                 Rectangle {
                                     x: 0px; y: 0px; height: parent.height;
-                                    width: parent.width * clamp((level + 60) / 60, 0, 1);
+                                    width: parent.width * clamp((level + 60) / (root.true-peak-selected ? 66 : 60), 0, 1);
                                     clip: true;
                                     Rectangle {
                                         x: 0px; y: 0px; width: track.width; height: track.height;
                                         background: Appearance.accent;
                                     }
                                 }
+                                // Mark full scale and leave room on the right for overs.
+                                if root.true-peak-selected: Rectangle {
+                                    x: parent.width * 60 / 66;
+                                    y: 0px; width: 1px; height: parent.height;
+                                    background: Graphite.text.transparentize(0.35);
+                                }
                             }
                             GraphLabel {
-                                text: level <= -1000 ? "−∞" : "" + round(level * 10) / 10;
+                                text: root.true-peak-selected ? root.peak-label(level)
+                                    : level <= -1000 ? "−∞" : "" + round(level * 10) / 10;
                                 width: 54px;
                                 horizontal-alignment: right;
                                 color: Graphite.text;
-                                accessible-label: (index == 0 ? "Left level: " : "Right level: ") + self.text + " dBFS";
+                                accessible-label: root.true-peak-selected
+                                    ? (index == 0 ? "Left true peak: " : "Right true peak: ") + self.text + " dBTP"
+                                    : (index == 0 ? "Left level: " : "Right level: ") + self.text + " dBFS";
                             }
                         }
                         HorizontalLayout {
@@ -867,16 +965,34 @@ export component MainWindow inherits Window {
                             stereo-scale := Rectangle {
                                 height: 16px;
                                 horizontal-stretch: 1;
-                                for tick[index] in ["−60", "−48", "−36", "−24", "−12", "0"]: GraphLabel {
+                                for tick[index] in (root.true-peak-selected
+                                    ? ["−60", "−48", "−36", "−24", "−12", "0", "+6"] : ["−60", "−48", "−36", "−24", "−12", "0"]): GraphLabel {
                                     width: 30px;
                                     height: parent.height;
-                                    x: clamp(index * parent.width / 5 - self.width / 2, 0px, parent.width - self.width);
+                                    x: clamp((index == 6 ? 1 : index / (root.true-peak-selected ? 5.5 : 5)) * parent.width
+                                        - self.width / 2, 0px, parent.width - self.width);
                                     text: tick;
-                                    horizontal-alignment: index == 0 ? left : index == 5 ? right : center;
+                                    horizontal-alignment: index == 0 ? left
+                                        : index == (root.true-peak-selected ? 6 : 5) ? right : center;
                                 }
                             }
                             Rectangle { width: 54px; }
                         }
+                    }
+                }
+                if root.true-peak-selected: HorizontalLayout {
+                    spacing: 8px;
+                    cross-axis-alignment: center;
+                    GraphLabel {
+                        text: "Max L " + root.peak-label(root.true-peak-max-left) + "  ·  R " + root.peak-label(root.true-peak-max-right) + " dBTP";
+                        accessible-label: self.text;
+                        color: max(root.true-peak-max-left, root.true-peak-max-right) >= 0 ? Appearance.accent : Graphite.secondary;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    Button {
+                        text: "Reset"; height: 24px;
+                        accessible-label: "Reset true-peak hold";
+                        clicked => { root.reset-true-peak(); }
                     }
                 }
                 if root.live-mode == 0 || root.live-mode == 3: Rectangle {
@@ -1014,7 +1130,13 @@ export component MainWindow inherits Window {
                         Tooltip { text: @markdown("Largest difference from the reference curve on the fitting grid."); }
                     }
                     Rectangle { horizontal-stretch: 1; }
-                    if root.show-clipping && root.clipping && root.clip-regions.length > 0: GraphLabel {
+                    if root.show-limiter-hit: GraphLabel {
+                        text: root.limiter-graph-label; color: root.limiter-color;
+                        accessible-label: self.text;
+                        Tooltip { text: @markdown("Gain reduction applies across the signal. Shading shows strong output frequencies during the hit."); }
+                    }
+                    if root.show-clipping && root.clipping && root.clip-regions.length > 0
+                        && (!root.narrow || !root.show-limiter-hit): GraphLabel {
                         text: "Strong Bands At Clip"; color: Appearance.accent;
                         Tooltip { text: @markdown("Strong output frequencies during the clip. Digital clipping affects the whole waveform."); }
                     }
@@ -1057,10 +1179,23 @@ export component MainWindow inherits Window {
                         if root.show-clipping && root.clipping: Rectangle {
                             width: parent.width; height: parent.height; clip: true;
                             for region in root.clip-regions: Rectangle {
-                                x: region.start * parent.width;
-                                width: (region.end - region.start) * parent.width;
+                                x: root.eq-frequency-position(region.start) * parent.width;
+                                width: (root.eq-frequency-position(region.end) - root.eq-frequency-position(region.start)) * parent.width;
                                 height: parent.height;
                                 background: Appearance.accent.transparentize(0.82);
+                            }
+                        }
+                        if root.show-limiter-hit: Rectangle {
+                            width: parent.width; height: parent.height; clip: true;
+                            for region in root.limiter-regions: limiter-band := Rectangle {
+                                x: root.eq-frequency-position(region.start) * parent.width;
+                                width: (root.eq-frequency-position(region.end) - root.eq-frequency-position(region.start)) * parent.width;
+                                height: parent.height;
+                                background: root.limiter-color.transparentize(0.80);
+                                Rectangle {
+                                    width: parent.width; height: 3px;
+                                    background: root.limiter-color;
+                                }
                             }
                         }
                         for dot[index] in root.graph-dots: graph-handle := Rectangle {
@@ -1156,11 +1291,13 @@ export component MainWindow inherits Window {
                     padding-left: root.graph-axis-inset;
                     Rectangle {
                         height: 16px; horizontal-stretch: 1;
-                        GraphLabel { text: "20 Hz"; x: 0px; }
-                        GraphLabel { text: "100"; width: 32px; x: parent.width * 0.233 - self.width / 2; horizontal-alignment: center; }
-                        GraphLabel { text: "1k"; width: 32px; x: parent.width * 0.566 - self.width / 2; horizontal-alignment: center; }
-                        GraphLabel { text: "10k"; width: 32px; x: parent.width * 0.900 - self.width / 2; horizontal-alignment: center; }
-                        GraphLabel { text: "20k"; width: 32px; x: parent.width - self.width; horizontal-alignment: right; }
+                        for tick in root.eq-frequency-ticks: GraphLabel {
+                            width: 48px;
+                            x: clamp(tick.position * parent.width - self.width / 2, 0px, parent.width - self.width);
+                            text: tick.label;
+                            accessible-label: self.text;
+                            horizontal-alignment: tick.position == 0 ? left : tick.position == 1 ? right : center;
+                        }
                     }
                 }
                 if root.show-clipping: Rectangle { height: 1px; background: Graphite.border; }
@@ -1265,6 +1402,56 @@ export component MainWindow inherits Window {
                             clicked => { root.change-balance(0); root.finish-edit(); }
                             Tooltip { text: @markdown("Reset the balance to the center."); }
                         }
+                    }
+                }
+            }
+        }
+        // #######################################################
+        // set headphone effects and output peak protection
+        // #######################################################
+
+        if root.show-advanced: advanced-panel := Panel {
+            vertical-stretch: 0;
+            VerticalLayout {
+                padding: Graphite.panel-inset; spacing: Graphite.control-gap;
+                PanelHeading { text: "Advanced"; }
+                EffectSlider {
+                    label: "Headphone Crossfeed";
+                    hint: "Blend a little of each stereo channel into the opposite ear. Set to 0% to turn it off.";
+                    percent <=> root.crossfeed-percent;
+                    enabled: root.connected && root.crossfeed-available;
+                    changed => { root.change-advanced-effects(); }
+                }
+                EffectSlider {
+                    label: "Room Amount";
+                    hint: "Blend in short stereo room reflections. Saved for this output.";
+                    percent <=> root.room-percent;
+                    enabled: root.connected && root.room-available;
+                    changed => { root.change-advanced-effects(); }
+                }
+                HorizontalLayout {
+                    spacing: 12px;
+                    cross-axis-alignment: center;
+                    CheckBox {
+                        text: "Output Limiter";
+                        checked <=> root.limiter-enabled;
+                        toggled => { root.change-advanced-effects(); }
+                        Tooltip { text: @markdown("Turn down brief peaks after EQ and effects. The ceiling is −1 dBTP."); }
+                    }
+                    CheckBox {
+                        text: "Show on EQ";
+                        accessible-label: "Show limiter on EQ graph";
+                        checked <=> root.show-limiter-overlay;
+                        enabled: root.limiter-enabled;
+                        Tooltip { text: @markdown("Show limiter hits and the strongest frequencies present in the Standard EQ graph."); }
+                    }
+                    if root.limiter-enabled && !root.narrow: GraphLabel {
+                        text: "−1 dBTP ceiling";
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    if root.limiter-enabled: GraphLabel {
+                        text: root.limiter-reduction-label;
+                        accessible-label: self.text;
                     }
                 }
             }
@@ -1395,6 +1582,11 @@ export component MainWindow inherits Window {
         }
     }
     }
+
+    // #######################################################
+    // keep the toolbar and playback controls visible
+    // #######################################################
+
     top-controls := VerticalLayout {
         x: root.page-inset;
         y: root.page-inset + (root.simple-layout ? 0px : window-scroll.content-y);
@@ -1539,9 +1731,14 @@ export component MainWindow inherits Window {
             }
         }
     }
+
+    // #######################################################
+    // show display and playback settings
+    // #######################################################
+
     settings := PopupWindow {
         width: 420px;
-        private property <length> form-height: 408px + (root.has-login-start ? 31px : 0px)
+        private property <length> form-height: 449px + (root.has-login-start ? 31px : 0px)
             + (root.login-start-error == "" ? 0px : 36px)
             + (root.phase-mode-detail == "" ? 0px : 26px)
             + (root.phase-mode-error == "" ? 0px : 36px);
@@ -1582,6 +1779,10 @@ export component MainWindow inherits Window {
                             }
                             CheckBox { text: "Band list"; checked <=> root.show-band-list; }
                             CheckBox { text: "Preamp and balance"; checked <=> root.show-levels; }
+                            CheckBox {
+                                text: "Advanced"; checked <=> root.show-advanced;
+                                Tooltip { text: @markdown("Show the Advanced panel. Its audio settings still apply when the panel is hidden."); }
+                            }
                         }
                         VerticalLayout {
                             spacing: 8px;
@@ -1597,6 +1798,17 @@ export component MainWindow inherits Window {
                                     root.set-fullscreen-mode(enabled);
                                 }
                             }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: 12px;
+                        Label { text: "EQ frequency scale"; width: 136px; }
+                        Choice {
+                            accessible-name: "EQ frequency scale";
+                            model: ["Logarithmic", "Linear"];
+                            current-index <=> root.eq-frequency-scale-index;
+                            selected => { root.change-eq-frequency-scale(); root.save-graph-view(); }
+                            Tooltip { text: @markdown("Change the horizontal spacing of frequencies on the Standard EQ graph."); }
                         }
                     }
                     Rectangle { height: 1px; background: Graphite.divider; }
@@ -1675,6 +1887,11 @@ export component MainWindow inherits Window {
             }
         }
     }
+
+    // #######################################################
+    // explain the EQ phase modes
+    // #######################################################
+
     phase-help := PopupWindow {
         width: min(510px, root.width - 20px);
         height: min(500px, root.height - 20px);
@@ -1756,6 +1973,11 @@ export component MainWindow inherits Window {
             }
         }
     }
+
+    // #######################################################
+    // confirm changes that would discard edits
+    // #######################################################
+
     preset-load-warning := PopupWindow {
         width: 460px;
         height: 174px;
@@ -1892,6 +2114,11 @@ export component MainWindow inherits Window {
             }
         }
     }
+
+    // #######################################################
+    // show app credits and license information
+    // #######################################################
+
     about := PopupWindow {
         width: min(490px, root.width - 20px);
         height: min(350px, root.height - 20px);
@@ -1914,6 +2141,11 @@ export component MainWindow inherits Window {
                         VerticalLayout {
                             Text { text: root.title; color: Graphite.text; font-size: 20px; }
                             Label { text: "Version " + root.app-version; }
+                            Label {
+                                text: "Developed by Maximilian Hachen";
+                                accessible-label: self.text;
+                                wrap: word-wrap;
+                            }
                         }
                     }
                     Label { text: "Copyright © 2026 Simple Modern Equalizer contributors"; }
@@ -1953,6 +2185,11 @@ export component MainWindow inherits Window {
             }
         }
     }
+
+    // #######################################################
+    // browse and manage EQ presets
+    // #######################################################
+
     preset-menu := PopupWindow {
         private property <length> inset: 12px;
         private property <length> section-gap: 8px;

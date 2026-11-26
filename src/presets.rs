@@ -4,6 +4,10 @@ use std::{collections::{BTreeMap, BTreeSet}, fs, io, path::{Path, PathBuf}, time
 
 pub const DEFAULT_EQ_PLOT_HEIGHT: i32 = 260;
 
+// #######################################################
+// load built-in and user presets
+// #######################################################
+
 #[derive(Clone)]
 pub struct Preset {
     pub config: Config,
@@ -104,12 +108,20 @@ impl Preset {
     }
 }
 
+// #######################################################
+// persist display choices and output links
+// #######################################################
+
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Preferences {
     pub auto_headroom: bool,
     pub simple_auto_headroom: bool,
     pub phase_mode: crate::phase::Mode,
+    #[serde(rename = "headphone_crossfeed_percent", alias = "headphone_crossfeed")]
+    pub headphone_crossfeed: BTreeMap<String, Crossfeed>,
+    pub headphone_room_percent: BTreeMap<String, u8>,
+    pub limiter_enabled: bool,
     pub outputs: BTreeMap<String, String>,
     pub hidden_builtin_presets: BTreeSet<String>,
     pub live_size: i32,
@@ -120,6 +132,52 @@ pub struct Preferences {
     pub colors: crate::theme::ThemeColors,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(from = "SavedCrossfeed")]
+pub struct Crossfeed(u8);
+
+impl Crossfeed {
+    pub fn new(percent: u8) -> Self {
+        Self(percent.min(100))
+    }
+
+    pub fn percent(self) -> u8 {
+        self.0
+    }
+
+    pub fn settings(self) -> (f64, bool) {
+        (f64::from(self.0) / 100.0, self.0 > 0)
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum SavedCrossfeed {
+    Percent(u8),
+    Preset(CrossfeedPreset),
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum CrossfeedPreset {
+    Off,
+    Low,
+    Medium,
+    High,
+}
+
+impl From<SavedCrossfeed> for Crossfeed {
+    fn from(saved: SavedCrossfeed) -> Self {
+        Self::new(match saved {
+            SavedCrossfeed::Percent(percent) => percent,
+            SavedCrossfeed::Preset(CrossfeedPreset::Off) => 0,
+            SavedCrossfeed::Preset(CrossfeedPreset::Low) => 25,
+            SavedCrossfeed::Preset(CrossfeedPreset::Medium) => 50,
+            SavedCrossfeed::Preset(CrossfeedPreset::High) => 100,
+        })
+    }
+}
+
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct DisplayPreferences {
@@ -127,22 +185,29 @@ pub struct DisplayPreferences {
     pub live_mode: i32,
     pub band_list: bool,
     pub levels: bool,
+    pub advanced: bool,
     pub clipping: bool,
+    pub limiter_overlay: bool,
     pub preset_button: bool,
     pub eq_spectrum: bool,
+    pub eq_frequency_scale: crate::graph::FrequencyScale,
 }
 
 impl DisplayPreferences {
     pub fn live_mode_index(&self) -> i32 {
-        self.live_mode.saturating_sub(2).clamp(0, crate::live::STEREO_FIELD_MODE)
+        match self.live_mode {
+            8 => crate::live::TRUE_PEAK_MODE,
+            saved => saved.saturating_sub(2).clamp(0, crate::live::STEREO_FIELD_MODE),
+        }
     }
 }
 
 impl Default for DisplayPreferences {
     fn default() -> Self {
         Self {
-            live_mode: 2, band_list: true, levels: true,
-            clipping: true, preset_button: true, eq_spectrum: false,
+            live_mode: 2, band_list: true, levels: true, advanced: false,
+            clipping: true, limiter_overlay: false, preset_button: true, eq_spectrum: false,
+            eq_frequency_scale: crate::graph::FrequencyScale::default(),
         }
     }
 }
@@ -153,6 +218,9 @@ impl Default for Preferences {
             auto_headroom: false,
             simple_auto_headroom: true,
             phase_mode: crate::phase::Mode::default(),
+            headphone_crossfeed: BTreeMap::new(),
+            headphone_room_percent: BTreeMap::new(),
+            limiter_enabled: false,
             outputs: BTreeMap::new(),
             hidden_builtin_presets: BTreeSet::new(),
             live_size: 1,
@@ -201,6 +269,36 @@ mod tests {
     }
 
     #[test]
+    fn eq_frequency_scale_defaults_to_logarithmic_and_round_trips() {
+        use crate::graph::FrequencyScale;
+
+        let mut preferences: Preferences = serde_json::from_str(r#"{"display":{"live_mode":2}}"#).unwrap();
+        assert_eq!(preferences.display.eq_frequency_scale, FrequencyScale::Logarithmic);
+        preferences.display.eq_frequency_scale = FrequencyScale::Linear;
+        let saved = serde_json::to_value(&preferences).unwrap();
+        assert_eq!(saved["display"]["eq_frequency_scale"], "linear");
+        let loaded: Preferences = serde_json::from_value(saved).unwrap();
+        assert_eq!(loaded.display.eq_frequency_scale, FrequencyScale::Linear);
+    }
+
+    #[test]
+    fn previous_crossfeed_levels_load_as_percentages() {
+        let mut preferences: Preferences = serde_json::from_str(r#"{
+            "headphone_crossfeed": {"One": "off", "Two": "low", "Three": "medium", "Four": "high"},
+            "display": {"live_mode": 2}
+        }"#).unwrap();
+        for (output, percent) in [("One", 0), ("Two", 25), ("Three", 50), ("Four", 100)] {
+            assert_eq!(preferences.headphone_crossfeed[output].percent(), percent);
+        }
+        assert!(!preferences.display.advanced);
+        preferences.display.advanced = true;
+        let saved = serde_json::to_value(&preferences).unwrap();
+        assert_eq!(saved["headphone_crossfeed_percent"]["Two"], 25);
+        assert_eq!(saved["display"]["advanced"], true);
+        assert!(serde_json::from_value::<Preferences>(saved).unwrap().display.advanced);
+    }
+
+    #[test]
     fn saved_live_display_ids_survive_removed_displays() {
         for (saved, expected) in [
             (0, crate::live::BARS_MODE),
@@ -211,6 +309,7 @@ mod tests {
             (5, crate::live::BEFORE_AFTER_MODE),
             (6, crate::live::LOUDNESS_HISTORY_MODE),
             (7, crate::live::STEREO_FIELD_MODE),
+            (8, crate::live::TRUE_PEAK_MODE),
         ] {
             let display: DisplayPreferences =
                 serde_json::from_str(&format!(r#"{{"live_mode":{saved}}}"#)).unwrap();

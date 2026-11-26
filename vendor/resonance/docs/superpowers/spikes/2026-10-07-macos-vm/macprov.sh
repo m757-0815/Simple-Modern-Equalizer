@@ -1,5 +1,10 @@
 #!/bin/bash
 # Provision the macOS e2e VM: Homebrew, BlackHole, SwitchAudioSource, rust.
+
+#######################################################
+# provision the disposable macOS prototype guest
+#######################################################
+
 set -x
 export NONINTERACTIVE=1
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"

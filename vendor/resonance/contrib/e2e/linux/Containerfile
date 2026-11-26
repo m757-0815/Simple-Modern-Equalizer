@@ -1,6 +1,11 @@
 # PipeWire + WirePlumber with no real devices: the e2e agent creates null
 # sinks per scenario. Arch base so binaries built on the (CachyOS) host run
 # here unchanged.
+
+#######################################################
+# install the isolated PipeWire test environment
+#######################################################
+
 FROM docker.io/library/archlinux:base
 RUN pacman -Syu --noconfirm --needed pipewire wireplumber dbus procps-ng \
     && pacman -Scc --noconfirm

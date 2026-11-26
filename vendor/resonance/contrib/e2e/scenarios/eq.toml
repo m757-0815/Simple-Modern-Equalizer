@@ -1,3 +1,7 @@
+#######################################################
+# check the supported EQ band configurations
+#######################################################
+
 [[scenario]]
 id = "full-eq"
 tier = "full"

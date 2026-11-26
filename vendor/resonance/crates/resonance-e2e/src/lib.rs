@@ -10,6 +10,10 @@
     clippy::must_use_candidate
 )]
 
+// #######################################################
+// connect the live audio test modules
+// #######################################################
+
 pub mod checks;
 pub mod common;
 pub mod compare;

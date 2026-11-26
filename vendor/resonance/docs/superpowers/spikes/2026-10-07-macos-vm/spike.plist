@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+
+<!-- ####################################################### -->
+<!-- identify the prototype macOS audio capture app -->
+<!-- ####################################################### -->
+
 <plist version="1.0">
 <dict>
   <key>Label</key><string>e2e.spike</string>

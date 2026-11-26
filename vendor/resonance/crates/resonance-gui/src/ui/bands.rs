@@ -12,6 +12,10 @@ use crate::ui::widgets::{freq_color, gain_bar, gain_color};
 use eframe::egui;
 use resonance_ipc::{BandDynamics, BandScope, BandType, ChannelMask, Command, DaemonState};
 
+// #######################################################
+// edit filter settings in the EQ bands table
+// #######################################################
+
 const IDX_W: f32 = 26.0;
 const ON_W: f32 = 36.0;
 const FREQ_W: f32 = 58.0;

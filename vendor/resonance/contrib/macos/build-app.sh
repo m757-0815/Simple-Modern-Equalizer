@@ -13,6 +13,11 @@
 # With SIGN_IDENTITY unset we use an ad-hoc signature ("-"), which is
 # accepted by Gatekeeper for locally-built apps and is enough to let
 # macOS register a TCC entry for the bundle.
+
+#######################################################
+# assemble the signed macOS app bundle
+#######################################################
+
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")/../.." && pwd)"

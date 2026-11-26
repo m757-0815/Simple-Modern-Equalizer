@@ -1,3 +1,7 @@
+#######################################################
+# build the live audio test agent
+#######################################################
+
 [package]
 name = "resonance-e2e"
 description = "Live-audio end-to-end test agent (never shipped)"

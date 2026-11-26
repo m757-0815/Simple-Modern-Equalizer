@@ -8,6 +8,10 @@ use rustfft::{FftPlanner, num_complex::Complex};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 
+// #######################################################
+// define the available phase modes and their delay budgets
+// #######################################################
+
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Mode {
@@ -46,6 +50,10 @@ impl Mode {
         })
     }
 }
+
+// #######################################################
+// build the phase filter for the negotiated sample rate
+// #######################################################
 
 /// An IR request is comparable so unrelated settings never reload the audio buffer.
 #[derive(PartialEq)]

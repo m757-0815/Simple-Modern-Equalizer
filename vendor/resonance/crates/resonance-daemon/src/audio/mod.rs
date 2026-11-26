@@ -50,7 +50,9 @@ pub fn target_channels() -> usize {
 /// Capacity of the spectrum SPSC ring buffer (mono `f32` samples).
 pub const SPECTRUM_BUF: usize = 8192;
 
-// ── Platform backends ────────────────────────────────────────────────────────
+// #######################################################
+// Platform backends
+// #######################################################
 
 /// Pure per-application stream helpers (key/identity), shared by all backends.
 mod app_streams;
@@ -138,19 +140,25 @@ pub fn spawn(ctx: BackendCtx) -> Result<JoinHandle<()>> {
     backend::spawn(ctx)
 }
 
-// ── Shared RT helpers ────────────────────────────────────────────────────────
+// #######################################################
+// Shared RT helpers
+// #######################################################
 
 /// Apply a `AudioCommand` to the live `ProcessorChain` from the RT thread.
 /// Shared by every backend so the command-dispatch logic stays in one place.
 pub fn apply_command(chain: &mut ProcessorChain, cmd: AudioCommand) {
     use resonance_dsp::filter::ApoFilter;
     match cmd {
-        AudioCommand::SetPower(on) => chain.enabled = on,
+        AudioCommand::SetPower(on) => chain.set_power(on),
         AudioCommand::SetPreamp(db) => chain.preamp_db = db,
         AudioCommand::SetEffectIntensity { effect, value } => {
             chain.set_effect_intensity(effect, value);
         }
         AudioCommand::SetEffectEnabled { effect, on } => chain.set_effect_enabled(effect, on),
+        AudioCommand::SetOutputEffects(effects) => {
+            chain.room.set_amount(effects.room_amount);
+            chain.limiter.set_enabled(effects.limiter_enabled);
+        }
         AudioCommand::SetDither { bits } => chain.set_dither(bits),
         AudioCommand::ReplaceChain(c) => {
             // The incoming chain carries the shadow/preset construction rate
@@ -164,6 +172,10 @@ pub fn apply_command(chain: &mut ProcessorChain, cmd: AudioCommand) {
             let live_rate = chain.sample_rate;
             *chain = *c;
             chain.rebind_sample_rate(live_rate);
+        }
+        #[cfg(target_os = "linux")]
+        AudioCommand::ReplacePlayback { chain: next, .. } => {
+            apply_command(chain, AudioCommand::ReplaceChain(next));
         }
         AudioCommand::Reset => chain.reset(),
         AudioCommand::SetBand {

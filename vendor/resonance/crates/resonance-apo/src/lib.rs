@@ -10,6 +10,10 @@
 //! The [`state`] module (the memory-mapped daemon→APO bridge) is platform
 //! agnostic; the daemon links it on every OS.
 
+// #######################################################
+// process Windows audio inside the APO
+// #######################################################
+
 pub mod state;
 
 // The C-ABI engine + its logging are only ever linked by the Windows C++ APO

@@ -6,6 +6,11 @@
 # signing identity, as in the e2e base image). UPGRADE_BUNDLE (a second build, same identity)
 # adds the "replace under a running daemon" step. Needs BlackHole 2ch/16ch and the audiodev
 # helper; exits non-zero on any failed check. ~3 minutes, run from `vmctl.sh script`.
+
+#######################################################
+# verify daemon startup and shutdown in the macOS guest
+#######################################################
+
 set -u
 BUNDLE=${1:?bundle}
 UPGRADE=${2:-}

@@ -1,5 +1,10 @@
 #!/bin/sh
 # Start a private session bus, PipeWire and WirePlumber, then run the command.
+
+#######################################################
+# start the Linux audio graph and execute the test agent
+#######################################################
+
 set -eu
 export XDG_RUNTIME_DIR=/run/e2e
 # The agent refuses to run without this (it reconfigures audio).

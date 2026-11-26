@@ -2,6 +2,10 @@
 //! control, UI discovery). The tray *binary* lives in the `resonance-tray`
 //! crate; this module is the dep-light control API so CLI/TUI/GUI stay in sync.
 
+// #######################################################
+// share tray operations between desktop and terminal clients
+// #######################################################
+
 pub mod autostart;
 pub mod config;
 pub mod control;

@@ -2,6 +2,11 @@
 # Copyright (C) 2026 PEQdB Inc., and is therefore licensed LGPL-3.0-or-later —
 # separate from the rest of the workspace so its copyleft stays contained. The
 # init/smoothing strategies were in turn adapted from jaakkopasanen/AutoEq (MIT).
+
+#######################################################
+# build the automatic headphone correction fitter
+#######################################################
+
 [package]
 name = "resonance-autoeq"
 description = "Parametric AutoEQ fit — Rust port of peqdb/autoeq-c (LGPL-3.0)"

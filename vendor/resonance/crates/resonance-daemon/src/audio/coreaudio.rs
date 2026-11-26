@@ -156,7 +156,9 @@ pub fn spawn(ctx: super::BackendCtx) -> Result<JoinHandle<()>> {
             let mut last_active_output: Option<String> = None;
             let mut backoff = Duration::from_millis(200);
 
-            // ── Per-application mixer mode (opt-in: RESONANCE_PERAPP) ─────────
+            // #######################################################
+            // Per-application mixer mode (opt-in: RESONANCE_PERAPP)
+            // #######################################################
             // Tap every audio-producing app individually (muted), gain + sum to
             // stereo, then run the chain. Opt-in so the default device-bound tap
             // (multichannel, system-wide EQ) is never regressed.
@@ -393,7 +395,9 @@ fn run_streams(
     }
     publish_sinks(&host, sinks_tx);
 
-    // ── Stream construction ────────────────────────────────────────────────
+    // #######################################################
+    // Stream construction
+    // #######################################################
     let out_channels = out_cfg.channels.max(1) as usize;
 
     // Size the ring for ~340 ms of interleaved audio at the device width + rate,
@@ -451,7 +455,9 @@ fn run_streams(
          DSP → output {out_channels} ch"
     );
 
-    // ── Supervisor loop ───────────────────────────────────────────────────
+    // #######################################################
+    // Supervisor loop
+    // #######################################################
     // Poll devices + route changes ~4×/sec. Streams play in their own threads.
     let mut sink_poll = Instant::now();
     let mut diag_poll = Instant::now();
@@ -596,7 +602,9 @@ fn build_output_stream(
             *s = 0.0;
         }
 
-        // ── Per-app fold → chain input ─────────────────────────────────────
+        // #######################################################
+        // Per-app fold → chain input
+        // #######################################################
         // Normal: the chain processes the ring buffer (device width) directly.
         // Per-app mixer: each app occupies channel pair `[2i,2i+1]`; gain it by
         // the app's volume (0 when muted) and sum to stereo — that sum is the
@@ -638,7 +646,9 @@ fn build_output_stream(
         };
         let cneeded = frames * cc;
 
-        // ── DSP ───────────────────────────────────────────────────────────
+        // #######################################################
+        // DSP
+        // #######################################################
         let mut s = shared.lock().unwrap();
 
         // Apply pending IPC commands first so latency is one block at most.
@@ -705,6 +715,7 @@ fn build_output_stream(
                 in_rms,
                 out_rms,
                 stereo_rms: resonance_dsp::analysis::stereo_rms(chain_buf, cc),
+                limiter_reduction_db: s.chain.limiter.reduction_db,
                 clip: out_peak >= 0.999,
                 dsp_load: load,
                 dsp_frame_us: dt.as_micros() as u32,
@@ -717,6 +728,7 @@ fn build_output_stream(
                 in_rms,
                 out_rms: in_rms,
                 stereo_rms: resonance_dsp::analysis::stereo_rms(chain_buf, cc),
+                limiter_reduction_db: 0.0,
                 clip: in_peak >= 0.999,
                 dsp_load: 0.0,
                 dsp_frame_us: 0,
@@ -735,7 +747,9 @@ fn build_output_stream(
         }
         drop(s);
 
-        // ── Render to output ──────────────────────────────────────────────
+        // #######################################################
+        // Render to output
+        // #######################################################
         render_to_output(chain_buf, data, cc, dc);
 
         let _ = err_flag.load(Ordering::Relaxed);

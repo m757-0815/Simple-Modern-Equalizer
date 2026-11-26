@@ -1,4 +1,9 @@
 # Added latency (ms) per scenario. Rewritten by `cargo xtask e2e --update-baseline`.
+
+#######################################################
+# record latency baselines for the macOS audio scenarios
+#######################################################
+
 "apo-all-types@48000x2" = 73.42
 "convolution@48000x2" = 78.94
 "convolution@96000x2" = -50.51

@@ -3,6 +3,10 @@
 use resonance_ipc::tray::{LeftClick, TrayConfig, Ui};
 use resonance_ipc::{Command, DaemonState};
 
+// #######################################################
+// map tray menu actions to daemon commands
+// #######################################################
+
 /// A user-initiated tray menu action. Only a subset map to a daemon `Command`
 /// (see [`plan_command`]) — the rest are side-effecting (service lifecycle, UI
 /// process launch, local config) and handled directly by `daemon.rs`.

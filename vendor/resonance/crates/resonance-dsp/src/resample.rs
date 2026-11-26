@@ -29,6 +29,10 @@ use rubato::{
     SincInterpolationType, WindowFunction, calculate_cutoff,
 };
 
+// #######################################################
+// convert streaming audio between sample rates
+// #######################################################
+
 /// Input frames consumed per internal rubato chunk. A fixed-input resampler
 /// requires this many frames per step, so input is buffered to this boundary.
 /// Smaller → lower buffering latency (`chunk / from_hz`), more per-call overhead.

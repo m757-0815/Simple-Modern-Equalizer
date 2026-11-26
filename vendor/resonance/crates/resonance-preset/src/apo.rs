@@ -2,6 +2,10 @@ use crate::model::{ApoFilterType, EqBand, Preset};
 use std::fmt::Write as _;
 use thiserror::Error;
 
+// #######################################################
+// read and write Equalizer APO filter settings
+// #######################################################
+
 #[derive(Debug, Error)]
 pub enum ApoError {
     #[error("parse error at line {line}: {msg}")]

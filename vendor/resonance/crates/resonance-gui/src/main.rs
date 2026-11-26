@@ -4,6 +4,10 @@
 // behind the app. `--dump-iconset` (used by CI) still works — it writes files.
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
+// #######################################################
+// start the Resonance desktop client
+// #######################################################
+
 mod app;
 mod browser;
 mod card_layout;

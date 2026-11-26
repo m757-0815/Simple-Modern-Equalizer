@@ -1,3 +1,7 @@
+#######################################################
+# build the Resonance command line client
+#######################################################
+
 [package]
 name = "resonance-cli"
 description = "CLI client for the Resonance daemon"

@@ -8,6 +8,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 use std::time::{Duration, Instant};
 
+// #######################################################
+// build and run the Windows audio suite in a test guest
+// #######################################################
+
 const NAME: &str = "e2e-windows";
 const USER: &str = "Quickemu";
 

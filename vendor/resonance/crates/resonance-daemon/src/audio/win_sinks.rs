@@ -33,6 +33,10 @@ use windows::Win32::System::Com::{
 };
 use windows::Win32::System::Variant::VT_LPWSTR;
 
+// #######################################################
+// read and change volume on WASAPI output devices
+// #######################################################
+
 /// Read a friendly-name PROPVARIANT as an owned String, guarding the union: only
 /// `VT_LPWSTR` with a non-null pointer is a valid wide string (any other variant
 /// or a null pointer would be a wild deref). Returns "" otherwise. Mirrors

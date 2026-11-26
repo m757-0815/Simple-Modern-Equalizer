@@ -14,8 +14,13 @@ pub const STEREO_LEVEL_MODE: i32 = 2;
 pub const BEFORE_AFTER_MODE: i32 = 3;
 pub const LOUDNESS_HISTORY_MODE: i32 = 4;
 pub const STEREO_FIELD_MODE: i32 = 5;
+pub const TRUE_PEAK_MODE: i32 = 6;
 const WIDTH: usize = 960;
 const HEIGHT: usize = 120;
+
+// #######################################################
+// pace the live monitor to the display refresh rate
+// #######################################################
 
 pub fn display_interval(millihertz: Option<u32>) -> Duration {
     let rate = millihertz.filter(|rate| *rate != 0).unwrap_or(120_000).clamp(30_000, 240_000);
@@ -39,6 +44,47 @@ pub fn amplitude_dbfs(amplitude: f32) -> f32 {
         20.0 * amplitude.log10()
     } else {
         SILENT_PEAK_DBFS
+    }
+}
+
+// #######################################################
+// display live peaks and hold the maximum
+// #######################################################
+
+pub struct TruePeakDisplay {
+    levels: [f32; 2],
+    hold: [Duration; 2],
+    maximum: [f32; 2],
+}
+
+impl Default for TruePeakDisplay {
+    fn default() -> Self {
+        Self { levels: [SILENT_PEAK_DBFS; 2], hold: [Duration::ZERO; 2], maximum: [SILENT_PEAK_DBFS; 2] }
+    }
+}
+
+impl TruePeakDisplay {
+    pub fn reset_maximum(&mut self) {
+        self.maximum = [SILENT_PEAK_DBFS; 2];
+    }
+
+    pub fn update(&mut self, peaks: Option<[f32; 2]>, elapsed: Duration) -> ([f32; 2], [f32; 2]) {
+        let targets = peaks.unwrap_or_default().map(amplitude_dbfs);
+        for (index, target) in targets.into_iter().enumerate() {
+            self.maximum[index] = self.maximum[index].max(target);
+            // Raise the live bar immediately and let it fall after a short hold.
+            if target >= self.levels[index] {
+                self.levels[index] = target;
+                self.hold[index] = Duration::from_millis(120);
+            } else {
+                self.hold[index] = self.hold[index].saturating_sub(elapsed);
+                if self.hold[index].is_zero() {
+                    let next = self.levels[index] - 36.0 * elapsed.as_secs_f32();
+                    self.levels[index] = if next < -100.0 { target } else { next.max(target) };
+                }
+            }
+        }
+        (self.levels, self.maximum)
     }
 }
 
@@ -75,6 +121,10 @@ pub fn smooth_stereo(displayed: &mut [f32; 2], rms: [f32; 2], elapsed: Duration)
         displayed[index]
     })
 }
+
+// #######################################################
+// render the bars and oscilloscope from current audio
+// #######################################################
 
 #[derive(Default)]
 pub struct LiveMeters {

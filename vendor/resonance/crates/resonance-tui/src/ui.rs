@@ -79,7 +79,9 @@ pub fn render(app: &App, frame: &mut Frame) {
     }
 }
 
-// ── Help overlay ────────────────────────────────────────────────────────────
+// #######################################################
+// Help overlay
+// #######################################################
 
 fn render_help(app: &App, frame: &mut Frame, area: Rect) {
     let dialog = centered_rect(area, 60, 80);
@@ -193,7 +195,9 @@ fn render_help(app: &App, frame: &mut Frame, area: Rect) {
     frame.render_widget(Paragraph::new(lines).block(block), dialog);
 }
 
-// ── Footer / contextual help ───────────────────────────────────────────────
+// #######################################################
+// Footer / contextual help
+// #######################################################
 
 fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
     // The dither/IR shortcuts are only advertised when their toggles are on.
@@ -245,7 +249,9 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
     frame.render_widget(Paragraph::new(line), area);
 }
 
-// ── Status bar ────────────────────────────────────────────────────────────
+// #######################################################
+// Status bar
+// #######################################################
 
 /// Sample-rate readout: a single rate when capture and DSP rates match, or
 /// `capture→DSP` when a resampler is engaged (rates differ by >1 Hz).
@@ -477,7 +483,9 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
-// ── EQ curve ──────────────────────────────────────────────────────────────
+// #######################################################
+// EQ curve
+// #######################################################
 
 /// One reference-overlay polyline ready to plot: (colour, legend name, points).
 type RefRun = (Color, &'static str, Vec<(f64, f64)>);
@@ -814,7 +822,9 @@ fn curve_runs(points: &[(f64, f64)]) -> Vec<(Color, Vec<(f64, f64)>)> {
     runs
 }
 
-// ── Spectrum analyzer ────────────────────────────────────────────────────
+// #######################################################
+// Spectrum analyzer
+// #######################################################
 
 /// Colour gradient by bar-height fraction: green (low) → yellow → red (peaks).
 fn spectrum_color(t: f64) -> Color {
@@ -916,7 +926,9 @@ fn render_spectrum(app: &App, frame: &mut Frame, area: Rect) {
     }
 }
 
-// ── FxSound effects panel ─────────────────────────────────────────────────
+// #######################################################
+// FxSound effects panel
+// #######################################################
 
 fn render_effects(app: &App, frame: &mut Frame, area: Rect) {
     let focused = app.focus == Panel::Effects;
@@ -1015,7 +1027,9 @@ fn render_effect_row(app: &App, frame: &mut Frame, idx: usize, area: Rect, panel
     frame.render_widget(Paragraph::new(Line::from(vec![enable_sym])), row[4]);
 }
 
-// ── Applications panel ──────────────────────────────────────────────────────
+// #######################################################
+// Applications panel
+// #######################################################
 
 /// Per-application volume/mute strip: one row per app (mute glyph · name ·
 /// volume gauge · percentage), mirroring the Effects rows. Shown only when the
@@ -1223,7 +1237,9 @@ fn render_app_row(
     );
 }
 
-// ── EQ bands panel ────────────────────────────────────────────────────────
+// #######################################################
+// EQ bands panel
+// #######################################################
 
 /// Render a single text cell into `rect`. Shared by the band header and data
 /// rows so every cell aligns and styles identically.
@@ -1355,7 +1371,9 @@ fn render_bands(app: &App, frame: &mut Frame, area: Rect) {
     let header_rect = Rect::new(inner.x, inner.y, inner.width, 1);
     render_band_header(app, frame, header_rect, focused, show_ch, full_names);
 
-    // ── Data rows (with scroll) ──
+    // #######################################################
+    // Data rows (with scroll)
+    // #######################################################
     let visible = (inner.height - 1) as usize;
     let offset = crate::layout::band_scroll_offset(app.band_cursor, bands.len(), visible);
 
@@ -1622,7 +1640,9 @@ fn gain_bar(db: f64, width: usize) -> String {
     cells.into_iter().collect()
 }
 
-// ── Band cell colour mapping ───────────────────────────────────────────────
+// #######################################################
+// Band cell colour mapping
+// #######################################################
 
 /// Gain: neutral grey at 0, deepening green for boosts, deepening red for cuts.
 fn gain_color(db: f64) -> Color {
@@ -1666,7 +1686,9 @@ fn hsv_to_rgb(h: f64, s: f64, v: f64) -> (u8, u8, u8) {
     )
 }
 
-// ── Load-preset file picker ─────────────────────────────────────────────────
+// #######################################################
+// Load-preset file picker
+// #######################################################
 
 fn centered_rect(area: Rect, pct_w: u16, pct_h: u16) -> Rect {
     // Widen the multiply: area.width * pct_w overflows u16 past ~819 columns.
@@ -1706,7 +1728,9 @@ fn render_browser(b: &Browser, frame: &mut Frame, area: Rect) {
     let cols =
         Layout::horizontal([Constraint::Percentage(42), Constraint::Percentage(58)]).split(inner);
 
-    // ── File list ──
+    // #######################################################
+    // File list
+    // #######################################################
     let items: Vec<ListItem> = b
         .entries
         .iter()
@@ -1733,7 +1757,9 @@ fn render_browser(b: &Browser, frame: &mut Frame, area: Rect) {
         .highlight_style(Style::default().fg(Color::Yellow).bold());
     frame.render_stateful_widget(list, cols[0], &mut list_state);
 
-    // ── Preview pane ──
+    // #######################################################
+    // Preview pane
+    // #######################################################
     let preview_block = Block::default()
         .borders(Borders::LEFT)
         .border_style(Style::default().fg(Color::DarkGray))
@@ -1749,7 +1775,9 @@ fn render_browser(b: &Browser, frame: &mut Frame, area: Rect) {
     frame.render_widget(Paragraph::new(lines), preview_inner);
 }
 
-// ── Output selector popup ─────────────────────────────────────────────────
+// #######################################################
+// Output selector popup
+// #######################################################
 
 fn render_output_selector(
     sinks: &[String],
@@ -1816,7 +1844,9 @@ fn render_output_selector(
     frame.render_stateful_widget(list, inner, &mut list_state);
 }
 
-// ── Per-band channel-target picker ──────────────────────────────────────────
+// #######################################################
+// Per-band channel-target picker
+// #######################################################
 
 fn render_band_channels(
     index: usize,
@@ -1887,7 +1917,9 @@ fn render_band_channels(
     frame.render_stateful_widget(list, inner, &mut list_state);
 }
 
-// ── Per-band dynamics editor ────────────────────────────────────────────────
+// #######################################################
+// Per-band dynamics editor
+// #######################################################
 
 fn render_band_dynamics(
     index: usize,
@@ -1938,7 +1970,9 @@ fn render_band_dynamics(
     frame.render_stateful_widget(list, inner, &mut list_state);
 }
 
-// ── squig.link online browser ───────────────────────────────────────────────
+// #######################################################
+// squig.link online browser
+// #######################################################
 
 fn render_squig_browse(
     tab: SquigTab,
@@ -2057,7 +2091,9 @@ fn render_squig_browse(
     frame.render_stateful_widget(list, rows[2], &mut st);
 }
 
-// ── Settings popup ─────────────────────────────────────────────────────────
+// #######################################################
+// Settings popup
+// #######################################################
 
 fn render_settings(s: &SettingsState, app: &App, frame: &mut Frame, area: Rect) {
     let dialog = centered_rect(area, 70, 80);
@@ -2852,7 +2888,9 @@ fn render_sub_picker(s: &SettingsState, frame: &mut Frame, parent: Rect) {
     frame.render_stateful_widget(list, inner, &mut list_state);
 }
 
-// ── Format helpers ────────────────────────────────────────────────────────
+// #######################################################
+// Format helpers
+// #######################################################
 
 fn fmt_freq(hz: f64) -> String {
     if hz >= 1000.0 {
@@ -2913,7 +2951,9 @@ mod tests {
         );
     }
 
-    // ── Headless render smoke tests (TestBackend) ──────────────────────────
+    // #######################################################
+    // Headless render smoke tests (TestBackend)
+    // #######################################################
 
     use crate::app::{App, InputMode, Panel, SquigTab};
     use ratatui::Terminal;
@@ -3545,7 +3585,9 @@ mod tests {
         assert_eq!(rebuilt, pts);
     }
 
-    // ── Pure band-table / EQ-graph helpers ─────────────────────────────────
+    // #######################################################
+    // Pure band-table / EQ-graph helpers
+    // #######################################################
 
     #[test]
     fn band_panel_title_shows_field_hint_only_when_focused() {
@@ -3636,7 +3678,9 @@ mod tests {
         assert_eq!(labels[2].content, "+18");
     }
 
-    // ── Status-bar pure helpers ─────────────────────────────────────────────
+    // #######################################################
+    // Status-bar pure helpers
+    // #######################################################
 
     #[test]
     fn sample_rate_label_collapses_matching_rates() {

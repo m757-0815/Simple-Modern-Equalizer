@@ -1,3 +1,7 @@
+#######################################################
+# define the app package and executable
+#######################################################
+
 [package]
 name = "simpledarkeq"
 version = "0.1.16"
@@ -8,6 +12,10 @@ build = "build.rs"
 [[bin]]
 name = "simple-modern-equalizer"
 path = "src/main.rs"
+
+#######################################################
+# list the shared UI and audio dependencies
+#######################################################
 
 [dependencies]
 slint = { version = "=1.18.1", features = ["unstable-winit-030"] }
@@ -21,6 +29,10 @@ tiny-skia = { version = "0.12", default-features = false, features = ["std", "si
 resonance-dsp = { path = "vendor/resonance/crates/resonance-dsp" }
 resonance-ipc = { path = "vendor/resonance/crates/resonance-ipc" }
 
+#######################################################
+# select the platform audio and media dependencies
+#######################################################
+
 [target.'cfg(windows)'.dependencies]
 cpal = "=0.17.3"
 windows = { version = "0.62.2", features = ["Media_Control", "Win32_System_WinRT"] }
@@ -28,11 +40,19 @@ windows = { version = "0.62.2", features = ["Media_Control", "Win32_System_WinRT
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus = "5.19.0"
 
+#######################################################
+# compile the Slint interface and support UI tests
+#######################################################
+
 [build-dependencies]
 slint-build = "=1.18.1"
 
 [dev-dependencies]
 i-slint-backend-testing = "=1.18.1"
+
+#######################################################
+# optimize the packaged executable
+#######################################################
 
 [profile.release]
 lto = true

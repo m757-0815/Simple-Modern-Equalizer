@@ -2,6 +2,11 @@
 # the 2-channel QEMU HDA device or the 8-channel Scream virtual device.
 # usage: select-endpoint.ps1 -Which hda|scream [-Force]   (no-op if already selected unless -Force;
 # -Force re-enables the device, which recovers a Scream endpoint a bad format left unavailable)
+
+#######################################################
+# select the Windows playback endpoint for a test run
+#######################################################
+
 param([ValidateSet('hda','scream')][string]$Which, [switch]$Force)
 $hda = Get-PnpDevice -Class MEDIA | ? InstanceId -like 'HDAUDIO*'
 $scream = Get-PnpDevice -Class MEDIA | ? InstanceId -like 'ROOT\MEDIA*'

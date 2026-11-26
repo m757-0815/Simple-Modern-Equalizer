@@ -11,6 +11,10 @@ use crate::ui::kit;
 use eframe::egui;
 use resonance_ipc::{Command, DaemonState, SinkVolume};
 
+// #######################################################
+// draw per-output volume and mute controls
+// #######################################################
+
 /// Volume slider range: 0–100 % (matches the Applications panel). Boost
 /// (>100 %) is set via the CLI and still shows here as a boost-green percentage
 /// with the slider pegged full.

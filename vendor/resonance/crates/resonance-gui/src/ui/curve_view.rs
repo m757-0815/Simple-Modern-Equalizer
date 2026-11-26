@@ -80,7 +80,9 @@ fn should_restop(needed: f64, current_target: f64) -> bool {
 }
 
 impl GuiApp {
-    // ── EQ response curve (draggable nodes) ─────────────────────────────────
+    // #######################################################
+    // EQ response curve (draggable nodes)
+    // #######################################################
 
     /// The FR "hero": one card holding the head bar, the plot, the selected-band
     /// readout, and the reference bar — all stacked with hairline dividers, like
@@ -390,13 +392,17 @@ impl GuiApp {
 
         let axes = PlotAxes { plot, vlo, vhi, db };
 
-        // ── Static background: region shading, grids, then the spectrum fill ──
+        // #######################################################
+        // Static background: region shading, grids, then the spectrum fill
+        // #######################################################
         self.draw_region_bands(&painter, &axes);
         self.draw_db_grid(&painter, &axes);
         self.draw_freq_grid(&painter, &axes);
         self.draw_spectrum_fill(&painter, state, &axes);
 
-        // ── Response curve(s) / reference overlay ────────────────────────────
+        // #######################################################
+        // Response curve(s) / reference overlay
+        // #######################################################
         self.draw_response(
             &painter,
             state,
@@ -417,7 +423,9 @@ impl GuiApp {
             .interact_pointer_pos()
             .is_some_and(|p| legend_rect.contains(p));
 
-        // ── Interaction: zoom, then drag/lock/add ────────────────────────────
+        // #######################################################
+        // Interaction: zoom, then drag/lock/add
+        // #######################################################
         self.handle_zoom(ui, &response, &painter, &axes, zoomed);
         self.handle_drag_and_locks(ui, state, &response, &axes, over_legend);
 
@@ -428,7 +436,9 @@ impl GuiApp {
             ui.ctx().request_repaint();
         }
 
-        // ── Foreground: band nodes, target tag, interactive legend ───────────
+        // #######################################################
+        // Foreground: band nodes, target tag, interactive legend
+        // #######################################################
         self.draw_band_nodes(&painter, state, &axes);
 
         // As the view normalises, the 0-line becomes the target — fade the tag in

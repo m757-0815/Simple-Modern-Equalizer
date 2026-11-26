@@ -8,6 +8,10 @@
 // every audio-path item individually.
 #![cfg_attr(windows, allow(dead_code))]
 
+// #######################################################
+// start the daemon and connect its workers
+// #######################################################
+
 mod audio;
 mod config;
 mod ipc_server;

@@ -5,6 +5,11 @@
 #  - `w32time` steps the clock by hours ~30 min after boot (the RTC is the host's local time read
 #    in the guest's timezone), which breaks cargo's mtime freshness checks and long timings.
 # Log: C:\harden.log, ends with "HARDEN DONE".
+
+#######################################################
+# prepare the isolated Windows guest for unattended test runs
+#######################################################
+
 sc.exe config wlms start= disabled *> C:\harden.log
 Stop-Service w32time -Force -EA 0; Set-Service w32time -StartupType Disabled -EA 0
 sc.exe qc wlms *>> C:\harden.log

@@ -13,6 +13,10 @@ const HISTORY_SECS: f32 = 30.0;
 const HISTORY_INTERVAL: Duration = Duration::from_millis(100);
 pub const FIELD_FRAMES: usize = 1024;
 
+// #######################################################
+// prepare audio for the comparison and stereo views
+// #######################################################
+
 pub enum Signal {
     Comparison { before: Vec<f32>, after: Vec<f32> },
     Stereo { samples: Vec<[f32; 2]>, correlation: Option<f32> },
@@ -34,23 +38,9 @@ impl Signal {
 
     #[cfg(target_os = "linux")]
     pub fn comparison(frames: &[[f32; 4]], rate: u32, analyzer: &mut crate::spectrum::Analyzer) -> Option<Self> {
-        // Use the peak of the two channel spectra so antiphase material stays visible.
-        let mut samples = Vec::with_capacity(frames.len());
         let mut levels = |offset: usize| {
-            let mut result = Vec::<f32>::new();
-            for channel in offset..offset + 2 {
-                samples.clear();
-                samples.extend(frames.iter().map(|frame| frame[channel]));
-                let levels = analyzer.levels(&samples, f64::from(rate), crate::spectrum::Resolution::Standard)?;
-                if result.is_empty() {
-                    result.extend_from_slice(levels.as_slice());
-                } else {
-                    for (combined, &level) in result.iter_mut().zip(levels.as_slice()) {
-                        *combined = (*combined).max(level);
-                    }
-                }
-            }
-            Some(result)
+            analyzer.stereo_levels(frames.iter().map(|frame| [frame[offset], frame[offset + 1]]),
+                f64::from(rate), crate::spectrum::Resolution::Standard).map(|bands| bands.as_slice().to_vec())
         };
         Some(Self::Comparison { before: levels(0)?, after: levels(2)? })
     }
@@ -60,6 +50,10 @@ impl Signal {
             (BEFORE_AFTER_MODE, Self::Comparison { .. }) | (STEREO_FIELD_MODE, Self::Stereo { .. }))
     }
 }
+
+// #######################################################
+// keep a rolling history of output level
+// #######################################################
 
 #[derive(Default)]
 pub struct History {
@@ -90,6 +84,10 @@ impl History {
         self.revision += 1;
     }
 }
+
+// #######################################################
+// render the monitor only when its inputs change
+// #######################################################
 
 #[derive(Default)]
 pub struct Plots {

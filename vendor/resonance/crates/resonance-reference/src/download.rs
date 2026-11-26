@@ -29,7 +29,9 @@ const USER_AGENT: &str = concat!("resonance/", env!("CARGO_PKG_VERSION"));
 /// content on first open without fetching all ~118 sites' indexes.
 const DEFAULT_ENABLED: &[&str] = &["dhrme", "precog", "dl", "kr0mka", "harpo", "achoreviews"];
 
-// ── squig.link JSON shapes ──────────────────────────────────────────────────
+// #######################################################
+// squig.link JSON shapes
+// #######################################################
 
 #[derive(Deserialize)]
 struct SiteEntry {
@@ -88,7 +90,9 @@ impl StrOrVec {
     }
 }
 
-// ── UI-facing catalog ───────────────────────────────────────────────────────
+// #######################################################
+// UI-facing catalog
+// #######################################################
 
 /// One selectable measurement in the flattened catalog.
 #[derive(Clone)]
@@ -708,7 +712,9 @@ fn fetch_measurement_target(m: &ModelEntry) -> Result<(String, RefCurve), String
     Ok((f.name, curve))
 }
 
-// ── config.js target parsing ──────────────────────────────────────────────────
+// #######################################################
+// config.js target parsing
+// #######################################################
 
 /// Extract target file basenames from a `CrinGraph` `config.js`. Finds the
 /// `targets = [ … ]` array and collects every quoted string inside each
@@ -984,7 +990,9 @@ fn quoted_strings(s: &str) -> Vec<String> {
     out
 }
 
-// ── HTTP + cache ────────────────────────────────────────────────────────────
+// #######################################################
+// HTTP + cache
+// #######################################################
 
 fn http_get(url: &str) -> Result<String, String> {
     ureq::get(url)

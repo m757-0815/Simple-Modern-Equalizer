@@ -1,3 +1,7 @@
+#######################################################
+# ignore build outputs and local settings
+#######################################################
+
 /target/
 /dist/
 /vendor/resonance/target/

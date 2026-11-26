@@ -14,6 +14,10 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+// #######################################################
+// record a reference signal through a Core Audio process tap
+// #######################################################
+
 static FILE *gout;
 static volatile unsigned long gcalls, gnz;
 static UInt32 gtotalch;

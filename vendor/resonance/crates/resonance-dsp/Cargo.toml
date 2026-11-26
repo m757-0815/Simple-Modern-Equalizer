@@ -1,3 +1,7 @@
+#######################################################
+# build the reusable DSP library and its benchmarks
+#######################################################
+
 [package]
 workspace = "../.."
 name = "resonance-dsp"

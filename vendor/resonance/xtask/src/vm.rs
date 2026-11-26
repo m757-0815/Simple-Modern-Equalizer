@@ -7,6 +7,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+// #######################################################
+// launch disposable test guests and connect to them
+// #######################################################
+
 /// `$RESONANCE_E2E_HOME` (default `~/.cache/resonance-e2e`).
 pub fn home() -> PathBuf {
     std::env::var_os("RESONANCE_E2E_HOME").map_or_else(

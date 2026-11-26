@@ -6,6 +6,10 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::Path;
 
+// #######################################################
+// measure delay from test chirps and compare it to the baseline
+// #######################################################
+
 #[must_use]
 pub fn median(mut v: Vec<f64>) -> Option<f64> {
     if v.is_empty() {

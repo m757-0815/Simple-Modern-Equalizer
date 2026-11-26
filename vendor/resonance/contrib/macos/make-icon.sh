@@ -9,6 +9,11 @@
 # Requires: `iconutil` (built into macOS) and one of `rsvg-convert`
 # (Homebrew: `brew install librsvg`) or `qlmanage` (built-in, slower
 # fallback).
+
+#######################################################
+# render the icon sizes required by macOS
+#######################################################
+
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")/../.." && pwd)"

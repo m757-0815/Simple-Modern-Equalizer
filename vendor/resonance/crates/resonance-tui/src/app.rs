@@ -274,7 +274,9 @@ impl App {
         }
     }
 
-    // ── Daemon (systemd user service) control ────────────────────────────────
+    // #######################################################
+    // Daemon (systemd user service) control
+    // #######################################################
 
     /// Refresh the cached service status snapshot.
     pub fn refresh_daemon_status(&mut self) {
@@ -296,7 +298,9 @@ impl App {
         }
     }
 
-    // ── Undo / redo ─────────────────────────────────────────────────────────
+    // #######################################################
+    // Undo / redo
+    // #######################################################
 
     fn snapshot(&self) -> Option<Snapshot> {
         let s = self.state.as_ref()?;
@@ -477,7 +481,9 @@ impl App {
         }
     }
 
-    // ── Normal-mode actions ────────────────────────────────────────────────
+    // #######################################################
+    // Normal-mode actions
+    // #######################################################
 
     pub fn toggle_power(&mut self) {
         let enabled = self.state.as_ref().is_none_or(|s| !s.enabled);
@@ -602,7 +608,9 @@ impl App {
         }
     }
 
-    // ── Navigation ────────────────────────────────────────────────────────
+    // #######################################################
+    // Navigation
+    // #######################################################
 
     /// Tab cycles left-to-right across columns, then wraps:
     /// Effects → Bands(Freq) → Bands(Gain) → Bands(Q) → Graph → Effects
@@ -855,7 +863,9 @@ impl App {
         }
     }
 
-    // ── Mouse hit-testing ─────────────────────────────────────────────────
+    // #######################################################
+    // Mouse hit-testing
+    // #######################################################
 
     /// Resolve a click on the effects column to an effect index.
     fn hit_effect(&self, col: u16, row: u16) -> Option<usize> {
@@ -1158,7 +1168,9 @@ impl App {
         }
     }
 
-    // ── FR-graph node editing (keyboard + mouse) ────────────────────────────
+    // #######################################################
+    // FR-graph node editing (keyboard + mouse)
+    // #######################################################
 
     /// The interactive plot rectangle of the EQ curve (None if too small).
     fn eq_plot(&self) -> Option<Rect> {
@@ -1317,7 +1329,9 @@ impl App {
         }
     }
 
-    // ── Channel targeting / routing (multichannel) ──────────────────────────
+    // #######################################################
+    // Channel targeting / routing (multichannel)
+    // #######################################################
 
     /// Whether per-channel controls should surface. Progressive disclosure:
     /// stereo/mono users never see the channel column or the picker — only
@@ -1440,7 +1454,9 @@ impl App {
         self.refresh_state();
     }
 
-    // ── Dynamic EQ editor (peaking bands) ────────────────────────────────────
+    // #######################################################
+    // Dynamic EQ editor (peaking bands)
+    // #######################################################
 
     /// Open the per-band dynamics editor (`Y`) for the selected band. Starts
     /// from the band's current parameters, or the defaults when dynamics are
@@ -1534,7 +1550,9 @@ impl App {
         self.refresh_state();
     }
 
-    // ── Convolution / impulse response ────────────────────────────────────
+    // #######################################################
+    // Convolution / impulse response
+    // #######################################################
 
     /// Open the `.wav` impulse-response picker (`I`). Enter loads/replaces the
     /// IR; while the picker is open, `t` toggles bypass and `x` removes it.
@@ -1586,7 +1604,9 @@ impl App {
             if b.purpose == crate::browser::BrowsePurpose::LoadIr)
     }
 
-    // ── Reference overlay / Auto-EQ ──────────────────────────────────────────
+    // #######################################################
+    // Reference overlay / Auto-EQ
+    // #######################################################
 
     /// Open the file picker to load a measurement curve (freq/dB `.txt`).
     pub fn begin_browse_measurement(&mut self) {
@@ -1730,7 +1750,9 @@ impl App {
         }
     }
 
-    // ── squig.link online browser ────────────────────────────────────────────
+    // #######################################################
+    // squig.link online browser
+    // #######################################################
 
     /// Open the online browser, warming the catalog from cache on first open
     /// (the network warm-up happens on the downloader's background thread).
@@ -1867,7 +1889,9 @@ impl App {
         }
     }
 
-    // ── Reference-overlay persistence ────────────────────────────────────────
+    // #######################################################
+    // Reference-overlay persistence
+    // #######################################################
 
     /// Where the reference overlay snapshot is stored. JSON (not TOML): the
     /// `PersistedReference` has scalar fields after table-valued ones, which
@@ -1933,7 +1957,9 @@ impl App {
         self.refresh_state();
     }
 
-    // ── Settings popup ─────────────────────────────────────────────────────
+    // #######################################################
+    // Settings popup
+    // #######################################################
 
     pub fn begin_settings(&mut self) {
         let profiles = match self.query(Command::ListProfiles) {
@@ -2674,7 +2700,9 @@ impl App {
     }
 }
 
-// ── FxSound effect helpers ─────────────────────────────────────────────────
+// #######################################################
+// FxSound effect helpers
+// #######################################################
 
 /// Narrow labels for the TUI effects column (kept local: "Dyn Boost" fits where
 /// the shared `FxEffectId::label()` "Dynamic Boost" would not). One entry per
@@ -2706,7 +2734,9 @@ pub fn fx_enabled(state: &DaemonState, idx: usize) -> bool {
     state.effects.get(fx_effect_at(idx)).1
 }
 
-// ── squig.link catalog filtering (shared by the browser actions + renderer) ──
+// #######################################################
+// squig.link catalog filtering (shared by the browser actions + renderer)
+// #######################################################
 
 /// Models whose display name or source contains the (case-insensitive) query.
 pub(crate) fn squig_filter_models<'a>(catalog: &'a Catalog, query: &str) -> Vec<&'a ModelEntry> {

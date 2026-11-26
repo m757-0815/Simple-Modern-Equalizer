@@ -1,5 +1,10 @@
 #!/bin/bash
 # Minimal Resonance.app (daemon only) for the e2e VM. Mirrors build-app.sh's signing.
+
+#######################################################
+# build the prototype macOS audio capture app
+#######################################################
+
 set -euo pipefail
 R=$HOME/resonance
 APP=/Applications/Resonance.app

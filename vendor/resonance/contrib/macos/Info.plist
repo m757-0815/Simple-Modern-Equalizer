@@ -1,8 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+
+<!-- ####################################################### -->
+<!-- identify the Resonance macOS app bundle -->
+<!-- ####################################################### -->
+
 <plist version="1.0">
 <dict>
-    <!-- Identity / metadata ------------------------------------------------ -->
+    <!-- ####################################################### -->
+    <!-- set the bundle identity and executable -->
+    <!-- ####################################################### -->
     <key>CFBundleName</key>
     <string>Resonance</string>
     <key>CFBundleDisplayName</key>

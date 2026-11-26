@@ -7,6 +7,10 @@ use super::{CHANNELS, SAMPLE_RATE};
 use anyhow::Result;
 use std::thread::{self, JoinHandle};
 
+// #######################################################
+// provide a fallback when no audio backend exists
+// #######################################################
+
 pub fn spawn(_ctx: super::BackendCtx) -> Result<JoinHandle<()>> {
     tracing::warn!(
         "no audio backend compiled for this platform — daemon is a control plane only \

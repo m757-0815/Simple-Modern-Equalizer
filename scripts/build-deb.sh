@@ -3,6 +3,10 @@ set -eu
 cd "$(dirname "$0")/.."
 umask 022
 
+#######################################################
+# read the distribution, package version, and architecture
+#######################################################
+
 # Build against the libraries of the distribution that will install the package.
 . /etc/os-release
 name=simple-modern-equalizer
@@ -11,6 +15,10 @@ version="${app_version}-1+${ID}${VERSION_ID}"
 arch=$(dpkg --print-architecture)
 maintainer='Simple Modern Equalizer contributors <m757-0815@users.noreply.github.com>'
 homepage=https://github.com/m757-0815/Simple-Modern-Equalizer
+
+#######################################################
+# build the binaries and stage the package files
+#######################################################
 
 sh scripts/build-linux.sh
 work=$(mktemp -d "$PWD/dist/.deb.XXXXXX")
@@ -35,6 +43,10 @@ install -m644 dist/linux/THIRD_PARTY_NOTICES.md "$doc_dir/"
     cat dist/linux/Inter-OFL.txt
 } > "$doc_dir/copyright"
 
+#######################################################
+# validate the launcher and detect shared library dependencies
+#######################################################
+
 desktop-file-validate "$package/usr/$desktop"
 
 # dpkg-shlibdeps reads its source package description from the working directory.
@@ -51,6 +63,10 @@ EOF
 shlib_deps=$(cd "$work" && dpkg-shlibdeps -O -e"$package_dir/$app_dir/$name" -e"$package_dir/$app_dir/resonanced")
 shlib_deps=${shlib_deps#shlibs:Depends=}
 test -n "$shlib_deps"
+
+#######################################################
+# write the package control information
+#######################################################
 
 installed_size=$(du -ks "$package" | cut -f1)
 # The window backend loads its display libraries dynamically.
@@ -70,6 +86,10 @@ Description: System-wide graphical audio equalizer
  Adjust system audio with tone controls, editable EQ curves,
  headphone presets, and live audio monitoring.
 EOF
+
+#######################################################
+# build and move the finished Debian package
+#######################################################
 
 output="${name}_${version}_${arch}.deb"
 dpkg-deb --root-owner-group --build "$package" "$work/$output"

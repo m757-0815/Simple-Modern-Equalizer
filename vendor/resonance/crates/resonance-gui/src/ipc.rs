@@ -8,6 +8,10 @@
 use resonance_ipc::transport::SyncClient;
 use std::time::Duration;
 
+// #######################################################
+// connect the desktop client to the daemon
+// #######################################################
+
 /// Read/write timeout for the worker's socket. A healthy `GetState` answers in
 /// well under a millisecond; this only bounds how long the worker waits on a
 /// stalled daemon before tearing the connection down. It runs off the UI

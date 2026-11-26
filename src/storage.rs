@@ -6,6 +6,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 const LIMIT: u64 = 1024 * 1024;
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+// #######################################################
+// keep one app instance per settings directory
+// #######################################################
+
 pub fn lock_instance(directory: &Path) -> io::Result<Option<File>> {
     let lock = OpenOptions::new().read(true).write(true).create(true).truncate(false)
         .open(directory.join("app.lock"))?;
@@ -15,6 +19,10 @@ pub fn lock_instance(directory: &Path) -> io::Result<Option<File>> {
         Err(fs::TryLockError::Error(error)) => Err(error),
     }
 }
+
+// #######################################################
+// read settings with a size limit
+// #######################################################
 
 pub fn read_text(path: &Path) -> io::Result<String> {
     let file = File::open(path)?;
@@ -29,6 +37,10 @@ pub fn read_text(path: &Path) -> io::Result<String> {
     }
     Ok(text)
 }
+
+// #######################################################
+// replace settings after the new file is ready
+// #######################################################
 
 /// Write beside the destination so the final rename stays on the same volume.
 pub fn write_text(path: &Path, bytes: &[u8]) -> io::Result<()> {

@@ -5,6 +5,10 @@
 use resonance_ipc::Meters;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
+// #######################################################
+// publish live meter readings without locking the audio thread
+// #######################################################
+
 /// One block's worth of measurements, produced on the RT thread.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Sample {
@@ -13,6 +17,7 @@ pub struct Sample {
     pub in_rms: f32,
     pub out_rms: f32,
     pub stereo_rms: [f32; 2],
+    pub limiter_reduction_db: f32,
     pub clip: bool,
     pub dsp_load: f32,
     pub dsp_frame_us: u32,
@@ -25,6 +30,7 @@ pub struct AtomicMeters {
     in_rms: AtomicU32,
     out_rms: AtomicU32,
     stereo_rms: [AtomicU32; 2],
+    limiter_reduction_db: AtomicU32,
     /// Latched: set by the RT thread on clip, cleared when read.
     clip: AtomicBool,
     dsp_load: AtomicU32,
@@ -101,9 +107,14 @@ impl AtomicMeters {
         }
         self.dsp_load.store(s.dsp_load.to_bits(), Ordering::Relaxed);
         self.dsp_frame_us.store(s.dsp_frame_us, Ordering::Relaxed);
+        self.limiter_reduction_db.store(s.limiter_reduction_db.to_bits(), Ordering::Relaxed);
         if s.clip {
             self.clip.store(true, Ordering::Relaxed);
         }
+    }
+
+    pub fn limiter_reduction_db(&self) -> f32 {
+        f32::from_bits(self.limiter_reduction_db.load(Ordering::Relaxed))
     }
 
     /// Read current meters, clearing the latched clip flag (IPC thread).

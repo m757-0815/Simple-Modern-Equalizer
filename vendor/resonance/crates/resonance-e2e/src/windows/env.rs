@@ -6,6 +6,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
+// #######################################################
+// prepare the Windows endpoint and test daemon
+// #######################################################
+
 /// The APO's own log (written by audiodg), one line per lifecycle event.
 pub fn apo_log_path() -> PathBuf {
     let pd = std::env::var_os("ProgramData")

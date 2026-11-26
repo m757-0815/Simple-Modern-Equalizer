@@ -8,6 +8,10 @@ use crate::convolution::IrData;
 use crate::filter::{ApoFilter, FilterType};
 use std::sync::Arc;
 
+// #######################################################
+// check that DSP output is independent of callback size
+// #######################################################
+
 const RATE: f64 = 48_000.0;
 const CH: usize = 2;
 

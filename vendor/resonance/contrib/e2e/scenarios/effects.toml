@@ -1,3 +1,7 @@
+#######################################################
+# check playback effects with live audio
+#######################################################
+
 [[scenario]]
 id = "fx-fidelity"
 tier = "full"

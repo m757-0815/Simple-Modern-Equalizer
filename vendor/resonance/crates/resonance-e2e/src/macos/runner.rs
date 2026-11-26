@@ -20,6 +20,10 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
 
+// #######################################################
+// run live tests through the macOS process tap
+// #######################################################
+
 const OS: &str = "macos";
 
 /// Per-octave limits against the render: transfer gain within ±0.03 dB and in-band SNR of at

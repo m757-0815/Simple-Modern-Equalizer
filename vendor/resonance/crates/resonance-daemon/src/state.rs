@@ -3,10 +3,14 @@ use resonance_dsp::channel::{ChannelMask, ChannelMatrix};
 use resonance_dsp::{chain::FxEffect, chain::ProcessorChain};
 use resonance_ipc::{
     AppStream, BandAudition, BandDynamics, BandScope, BandState, BandType, ConvolutionState,
-    DaemonState, EffectsState, FxEffectId, RoutingMatrix, SinkVolume, default_channel_layout,
+    DaemonState, EffectsState, FxEffectId, OutputEffects, RoutingMatrix, SinkVolume, default_channel_layout,
 };
 use rtrb::Producer;
 use std::sync::{Arc, Mutex};
+
+// #######################################################
+// combine audio commands and the live state reported to clients
+// #######################################################
 
 pub const SPECTRUM_BINS: usize = 64;
 
@@ -49,11 +53,17 @@ pub enum AudioCommand {
         effect: FxEffect,
         on: bool,
     },
+    SetOutputEffects(OutputEffects),
     /// Set (or clear) the final-stage output dither target bit depth.
     SetDither {
         bits: Option<u32>,
     },
     ReplaceChain(Box<ProcessorChain>),
+    #[cfg(target_os = "linux")]
+    ReplacePlayback {
+        chain: Box<ProcessorChain>,
+        warmup_frames: usize,
+    },
     #[allow(dead_code)]
     Reset,
     SetBand {
@@ -272,6 +282,7 @@ impl SharedState {
                     in_rms: t.in_rms,
                     out_rms: t.out_rms,
                     stereo_rms: t.stereo_rms,
+                    limiter_reduction_db: t.limiter_reduction_db,
                     clip: t.out_peak >= 1.0,
                     dsp_load: 0.0,
                     dsp_frame_us: 0,

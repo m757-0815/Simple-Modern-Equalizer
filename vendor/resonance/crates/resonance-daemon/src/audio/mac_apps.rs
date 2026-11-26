@@ -21,6 +21,10 @@ use resonance_ipc::AppStream;
 use std::ffi::c_void;
 use std::ptr::NonNull;
 
+// #######################################################
+// discover macOS audio apps and manage their volumes
+// #######################################################
+
 /// `kAudioObjectSystemObject` — the root object the process list hangs off.
 const SYSTEM_OBJECT: AudioObjectID = 1;
 /// Our own daemon/GUI bundle id — never list ourselves as a controllable app.

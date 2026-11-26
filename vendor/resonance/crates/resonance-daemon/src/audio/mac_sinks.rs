@@ -49,6 +49,10 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+// #######################################################
+// read and change volume on macOS output devices
+// #######################################################
+
 /// `kAudioObjectSystemObject` — the root the device list hangs off.
 const SYSTEM_OBJECT: AudioObjectID = 1;
 

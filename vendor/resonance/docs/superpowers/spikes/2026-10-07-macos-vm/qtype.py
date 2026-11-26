@@ -1,3 +1,7 @@
+#######################################################
+# type text into the prototype guest console
+#######################################################
+
 import socket, sys, time
 
 S = sys.argv[1]

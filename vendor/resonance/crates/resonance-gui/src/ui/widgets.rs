@@ -6,6 +6,10 @@ use crate::state::GAIN_LIMIT;
 use crate::theme::Palette;
 use eframe::egui;
 
+// #######################################################
+// share font, text, and layout helpers
+// #######################################################
+
 /// Bundled icon font: a ~2 KB subset of `DejaVu` Sans containing only the eight
 /// glyphs the UI draws (●▸↑✕✚→·…), which egui's built-in fonts lack. Embedded
 /// so icons render identically everywhere with negligible binary cost.

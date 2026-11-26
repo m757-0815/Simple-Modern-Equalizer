@@ -1,5 +1,10 @@
 # Build the daemon, the e2e agent and the APO in the VM, then install the APO with the
 # repo's own installer (run as SYSTEM: rustup lives in its profile). Log: C:\build.log.
+
+#######################################################
+# configure the Windows guest for live audio tests
+#######################################################
+
 $ErrorActionPreference = 'Continue'
 $env:Path = "C:\Windows\System32\config\systemprofile\.cargo\bin;C:\Users\Quickemu\.cargo\bin;" + $env:Path
 $env:CARGO_TERM_COLOR = 'never'

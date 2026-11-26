@@ -5,6 +5,10 @@
 use resonance_e2e::render::{BLOCK_FRAMES, load_exported_chain, render};
 use resonance_e2e::stimulus::generate;
 
+// #######################################################
+// check how the render responds to different input levels
+// #######################################################
+
 fn rms(x: &[f32]) -> f64 {
     (x.iter().map(|&v| f64::from(v).powi(2)).sum::<f64>() / x.len() as f64).sqrt()
 }

@@ -1,5 +1,9 @@
 use crate::{config::Config, phase::Mode};
 
+// #######################################################
+// measure peak and average gain for the active EQ
+// #######################################################
+
 /// Calculate peak and average gain from the active EQ response.
 /// Equal steps on a log-frequency axis approximate pink-noise excitation.
 fn response(cfg: &Config, sample_rate: f64, channels: usize, mode: Mode) -> (f64, f64) {
@@ -33,6 +37,10 @@ fn response(cfg: &Config, sample_rate: f64, channels: usize, mode: Mode) -> (f64
     };
     (peak, 10.0 * (mean_power * balance_power).log10())
 }
+
+// #######################################################
+// set headroom and match A/B listening levels
+// #######################################################
 
 pub fn prepare(
     current: &Config,

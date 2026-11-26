@@ -232,7 +232,9 @@ pub struct ReferenceState {
     pub manage_tquery: String,
     pub manage_mquery: String,
 
-    // ── Target customizer (stacks on the active target) ──
+    // #######################################################
+    // Target customizer (stacks on the active target)
+    // #######################################################
     pub adj_tilt: f64,
     pub adj_bass: f64,
     pub adj_ear: f64,
@@ -649,7 +651,9 @@ impl ReferenceState {
         self.normalized = false; // deviation view needs a measurement
     }
 
-    // ── Per-profile measurements ────────────────────────────────────────────
+    // #######################################################
+    // Per-profile measurements
+    // #######################################################
     // A profile can carry the measurement it was saved with, so loading the
     // profile restores that measurement for visual A/B comparison. Only the
     // measurement is bundled — the target is never stored per profile.

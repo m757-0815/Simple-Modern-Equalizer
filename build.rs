@@ -1,3 +1,7 @@
+// #######################################################
+// generate the Slint interface and embed platform resources
+// #######################################################
+
 fn main() {
     slint_build::compile_with_config("ui/main.slint",
         slint_build::CompilerConfiguration::new().with_style("cupertino-dark".into()).with_debug_info(true))
@@ -8,6 +12,10 @@ fn main() {
         embed_windows_icon();
     }
 }
+
+// #######################################################
+// build the Windows icon resource
+// #######################################################
 
 fn embed_windows_icon() {
     const ICON: &str = "ui/icons/app-icon.ico";

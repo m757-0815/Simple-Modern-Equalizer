@@ -6,6 +6,10 @@ use ksni::menu::{MenuItem, StandardItem, SubMenu};
 use resonance_ipc::tray::Ui;
 use std::sync::mpsc::{Receiver, Sender};
 
+// #######################################################
+// show a D-Bus status notifier on Linux
+// #######################################################
+
 struct TrayApp {
     model: MenuModel,
     actions: Sender<MenuAction>,

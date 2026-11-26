@@ -1,5 +1,10 @@
 # Every UI band type, all slopes, mid/side scopes, a per-channel band and a
 # dynamic band. 8 bands (snapshots hold at most 32).
+
+#######################################################
+# exercise the full EQ with the standard filter path
+#######################################################
+
 preamp_db = -6.0
 
 [[bands]]

@@ -1,5 +1,10 @@
 # Attach the Resonance APO to ONE slot of the endpoint named $Name, removing it from all others.
 # Scream (legacy WDM, no effect modes) only loads GFX (slot 2); see spec section 14.
+
+#######################################################
+# attach the audio effect to the selected test endpoint slot
+#######################################################
+
 param([string]$Slot = "2", [string]$Name = "Scream")  # -Slot none detaches the APO entirely
 # --- privileges needed to take ownership of SYSTEM-owned MMDevices keys ---
 Add-Type @"

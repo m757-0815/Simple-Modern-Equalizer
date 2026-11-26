@@ -4,6 +4,10 @@
 use crate::browser::Browser;
 use resonance_ipc::{BandState, BandType, EffectsState};
 
+// #######################################################
+// share desktop state for editing, dialogs, and undo
+// #######################################################
+
 /// A restorable snapshot of the editable chain state (undo/redo).
 #[derive(Clone)]
 pub(crate) struct Snapshot {

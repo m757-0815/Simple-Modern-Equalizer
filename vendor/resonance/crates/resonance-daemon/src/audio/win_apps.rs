@@ -30,6 +30,10 @@ use windows::Win32::System::Threading::{
 };
 use windows::core::{Interface, PWSTR};
 
+// #######################################################
+// find WASAPI audio sessions and control their volume
+// #######################################################
+
 /// Run `f` with the default render endpoint's session enumerator. Initialises
 /// COM on the calling thread (re-init is harmless: returns `S_FALSE`).
 fn with_sessions<T>(

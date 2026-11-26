@@ -1,6 +1,7 @@
 use crate::config::{Band, Config, SplineSource};
 use crate::plot_canvas::{Canvas, RasterSize};
 use crate::theme::{PLOT_GRID, PLOT_ZERO, ThemeColors};
+use serde::{Deserialize, Serialize};
 use slint::{Rgba8Pixel, SharedPixelBuffer};
 use std::sync::LazyLock;
 use tiny_skia::{Path, PathBuilder};
@@ -8,8 +9,82 @@ use tiny_skia::{Path, PathBuilder};
 const MAX_GAIN_DB: f64 = 24.0;
 const W: usize = 1920;
 const H: usize = 260;
-static RESPONSE_FREQUENCIES: LazyLock<[f64; W]> =
-    LazyLock::new(|| std::array::from_fn(|x| 20.0 * 1000.0_f64.powf(x as f64 / (W - 1) as f64)));
+const MIN_FREQUENCY: f64 = 20.0;
+const MAX_FREQUENCY: f64 = 20_000.0;
+const FREQUENCY_RATIO: f64 = MAX_FREQUENCY / MIN_FREQUENCY;
+static LOG_RESPONSE_FREQUENCIES: LazyLock<[f64; W]> =
+    LazyLock::new(|| std::array::from_fn(|x| FrequencyScale::Logarithmic.frequency(x as f64 / (W - 1) as f64)));
+static LINEAR_RESPONSE_FREQUENCIES: LazyLock<[f64; W]> =
+    LazyLock::new(|| std::array::from_fn(|x| FrequencyScale::Linear.frequency(x as f64 / (W - 1) as f64)));
+
+// #######################################################
+// map gain and frequency to graph coordinates
+// #######################################################
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FrequencyScale {
+    #[default]
+    Logarithmic,
+    Linear,
+}
+
+impl FrequencyScale {
+    pub fn from_index(index: i32) -> Self {
+        if index == 1 { Self::Linear } else { Self::Logarithmic }
+    }
+
+    pub fn index(self) -> i32 {
+        match self { Self::Logarithmic => 0, Self::Linear => 1 }
+    }
+
+    pub fn x(self, frequency: f64) -> f64 {
+        match self {
+            Self::Logarithmic => (frequency / MIN_FREQUENCY).log10() / 3.0,
+            Self::Linear => (frequency - MIN_FREQUENCY) / (MAX_FREQUENCY - MIN_FREQUENCY),
+        }
+    }
+
+    fn frequency(self, x: f64) -> f64 {
+        let x = x.clamp(0.0, 1.0);
+        match self {
+            Self::Logarithmic => MIN_FREQUENCY * FREQUENCY_RATIO.powf(x),
+            Self::Linear => MIN_FREQUENCY + (MAX_FREQUENCY - MIN_FREQUENCY) * x,
+        }
+    }
+
+    fn rounded_frequency(self, x: f64) -> f64 {
+        (self.frequency(x) * 10.0).round() / 10.0
+    }
+
+    fn response_frequencies(self) -> &'static [f64; W] {
+        match self {
+            Self::Logarithmic => &LOG_RESPONSE_FREQUENCIES,
+            Self::Linear => &LINEAR_RESPONSE_FREQUENCIES,
+        }
+    }
+
+    fn grid_frequencies(self) -> &'static [u32] {
+        match self {
+            Self::Logarithmic => &[20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000],
+            Self::Linear => &[20, 2500, 5000, 7500, 10000, 12500, 15000, 17500, 20000],
+        }
+    }
+
+    pub fn labeled_frequencies(self) -> [u32; 5] {
+        match self {
+            Self::Logarithmic => [20, 100, 1000, 10000, 20000],
+            Self::Linear => [20, 5000, 10000, 15000, 20000],
+        }
+    }
+
+    fn project_log_bin(self, x: f64) -> f64 {
+        match self {
+            Self::Logarithmic => x,
+            Self::Linear => self.x(Self::Logarithmic.frequency(x)),
+        }
+    }
+}
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct GainAxis {
@@ -37,9 +112,9 @@ impl GainAxis {
         }
     }
 
-    pub fn band_values(self, x: f64, y: f64) -> (f64, f64) {
+    pub fn band_values(self, scale: FrequencyScale, x: f64, y: f64) -> (f64, f64) {
         let gain = f64::from(self.range) * (1.0 - 2.0 * y.clamp(0.0, 1.0));
-        (frequency_at(x), self.round_gain(gain))
+        (scale.rounded_frequency(x), self.round_gain(gain))
     }
 
     fn round_gain(self, gain: f64) -> f64 {
@@ -50,14 +125,9 @@ impl GainAxis {
 
 pub fn position(frequency_hz: f64, gain_db: f64) -> (f64, f64) {
     (
-        (frequency_hz / 20.0).log10() / 3.0,
+        FrequencyScale::Logarithmic.x(frequency_hz),
         (MAX_GAIN_DB - gain_db) / (2.0 * MAX_GAIN_DB),
     )
-}
-
-fn frequency_at(x: f64) -> f64 {
-    let frequency_hz = 20.0 * 1000.0_f64.powf(x.clamp(0.0, 1.0));
-    (frequency_hz * 10.0).round() / 10.0
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -67,6 +137,10 @@ pub struct Dot {
     pub enabled: bool,
 }
 
+// #######################################################
+// apply graph gestures to EQ bands and spline points
+// #######################################################
+
 #[derive(Clone, Copy)]
 pub struct BandDrag {
     pub index: usize,
@@ -74,22 +148,25 @@ pub struct BandDrag {
     gain: f64,
     q: f64,
     axis: GainAxis,
+    frequency_scale: FrequencyScale,
 }
 
 impl BandDrag {
     pub fn new(index: usize, band: &Band) -> Self {
-        Self { index, frequency: band.frequency_hz, gain: band.gain_db, q: band.q, axis: GainAxis::default() }
+        Self { index, frequency: band.frequency_hz, gain: band.gain_db, q: band.q,
+            axis: GainAxis::default(), frequency_scale: FrequencyScale::default() }
     }
 
-    pub fn with_axis(mut self, axis: GainAxis) -> Self {
+    pub fn with_axes(mut self, axis: GainAxis, frequency_scale: FrequencyScale) -> Self {
         self.axis = axis;
+        self.frequency_scale = frequency_scale;
         self
     }
 
     pub fn update(&mut self, cfg: &mut Config, dx: f64, dy: f64) -> bool {
         let Some(current) = cfg.bands.get(self.index) else { return false; };
         let mut moved = current.clone();
-        (moved.frequency_hz, moved.gain_db) = drag_values(self.frequency, self.gain, dx, dy, self.axis);
+        (moved.frequency_hz, moved.gain_db) = drag_values(self.frequency, self.gain, dx, dy, self.axis, self.frequency_scale);
         if cfg.spline {
             if cfg.locked_point(self.index) || (moved.frequency_hz != current.frequency_hz
                 && !cfg.can_place_spline_point(moved.frequency_hz, Some(self.index)))
@@ -109,8 +186,8 @@ impl BandDrag {
     }
 }
 
-fn drag_values(frequency: f64, gain: f64, dx: f64, dy: f64, axis: GainAxis) -> (f64, f64) {
-    let moved_frequency = if dx == 0.0 { frequency } else { frequency_at(position(frequency, gain).0 + dx) };
+fn drag_values(frequency: f64, gain: f64, dx: f64, dy: f64, axis: GainAxis, scale: FrequencyScale) -> (f64, f64) {
+    let moved_frequency = if dx == 0.0 { frequency } else { scale.rounded_frequency(scale.x(frequency) + dx) };
     let moved_gain = if dy == 0.0 { gain } else { axis.round_gain(gain - dy * axis.span()) };
     (moved_frequency, moved_gain)
 }
@@ -125,6 +202,10 @@ pub fn hit_band(dots: &[Dot], x: f64, y: f64, width: f64, height: f64) -> Option
     }).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(index, _)| index)
 }
 
+// #######################################################
+// reuse the response curve and rendered graph
+// #######################################################
+
 #[derive(Default)]
 pub struct GraphCache {
     bands: Vec<Band>,
@@ -136,6 +217,7 @@ pub struct GraphCache {
     sample_rate: f64,
     phase_mode: crate::phase::Mode,
     pub axis: GainAxis,
+    pub frequency_scale: FrequencyScale,
     curve: Vec<f64>,
     curve_path: Option<Path>,
     rendered_spectrum: Vec<f32>,
@@ -162,6 +244,13 @@ impl GraphCache {
         }
     }
 
+    pub fn set_frequency_scale(&mut self, scale: FrequencyScale) {
+        if self.frequency_scale != scale {
+            self.frequency_scale = scale;
+            self.sample_rate = 0.0;
+        }
+    }
+
     pub fn set_colors(&mut self, colors: ThemeColors) {
         if self.colors.accent != colors.accent {
             self.colors = colors;
@@ -185,7 +274,7 @@ impl GraphCache {
         let mut changed = self.dots.len() != cfg.bands.len();
         self.dots.truncate(cfg.bands.len());
         for (index, band) in cfg.bands.iter().enumerate() {
-            let (x, _) = position(band.frequency_hz, band.gain_db);
+            let x = self.frequency_scale.x(band.frequency_hz);
             let y = if cfg.spline && !cfg.bypass && !self.curve.is_empty() {
                 // The sampled curve includes both editors' filters. The saved
                 // spline gain is relative to the filters at conversion time.
@@ -225,7 +314,8 @@ impl GraphCache {
             } else if cfg.bypass {
                 vec![0.0; W]
             } else {
-                let frequencies = RESPONSE_FREQUENCIES.iter().map(|&frequency| frequency.min(rate / 2.0));
+                let frequencies = self.frequency_scale.response_frequencies().iter()
+                    .map(|frequency| frequency.min(rate / 2.0));
                 cfg.response_in_mode(frequencies, rate, self.phase_mode)
             };
             self.bands.clone_from(&cfg.bands);
@@ -246,12 +336,15 @@ impl GraphCache {
         self.rendered_size = Some(size);
         if self.curve_path.is_none() {
             self.curve_path = if let Some(points) = direct_points {
-                band_spline(points, self.axis)
+                match self.frequency_scale {
+                    FrequencyScale::Logarithmic => band_spline(points, self.axis),
+                    FrequencyScale::Linear => linear_spline(points, self.axis),
+                }
             } else {
                 response_path(&self.curve, self.axis)
             };
         }
-        Some(render(self.curve_path.as_ref(), self.axis, self.output_offset, cfg.bypass, visible, size, self.colors))
+        Some(render(self.curve_path.as_ref(), self.axis, self.frequency_scale, self.output_offset, cfg.bypass, visible, size, self.colors))
     }
 }
 
@@ -275,6 +368,27 @@ fn band_spline(bands: &[Band], axis: GainAxis) -> Option<Path> {
     path.finish()
 }
 
+fn linear_spline(bands: &[Band], axis: GainAxis) -> Option<Path> {
+    let scale = FrequencyScale::Linear;
+    let x = |frequency| (scale.x(frequency) * W as f64) as f32;
+    let y = |gain| (axis.y(gain) * H as f64) as f32;
+    let (first, rest) = bands.split_first()?;
+    let mut path = PathBuilder::new();
+    path.move_to(x(first.frequency_hz), y(first.gain_db));
+    let mut grid = scale.response_frequencies().iter().copied().skip(1).peekable();
+    // Evaluate the logarithmic spline between its knots and include every knot
+    // explicitly so closely spaced bass points stay attached to the curve.
+    for band in rest {
+        while let Some(frequency) = grid.next_if(|frequency| *frequency <= band.frequency_hz) {
+            if frequency < band.frequency_hz {
+                path.line_to(x(frequency), y(crate::spline::gain_at(bands, frequency)));
+            }
+        }
+        path.line_to(x(band.frequency_hz), y(band.gain_db));
+    }
+    path.finish()
+}
+
 fn response_path(curve: &[f64], axis: GainAxis) -> Option<Path> {
     let y = |db| (axis.y(db) * (H - 1) as f64) as f32 + 0.5;
     let mut path = PathBuilder::new();
@@ -285,13 +399,13 @@ fn response_path(curve: &[f64], axis: GainAxis) -> Option<Path> {
     path.finish()
 }
 
-fn render(curve: Option<&Path>, axis: GainAxis, offset: f64, bypass: bool, spectrum: &[f32], size: RasterSize, colors: ThemeColors) -> SharedPixelBuffer<Rgba8Pixel> {
+fn render(curve: Option<&Path>, axis: GainAxis, scale: FrequencyScale, offset: f64, bypass: bool, spectrum: &[f32], size: RasterSize, colors: ThemeColors) -> SharedPixelBuffer<Rgba8Pixel> {
     let mut canvas = Canvas::new(W as u32, H as u32, size);
     let spectrum_fill = colors.graph_tint(0.17);
     for (i, value) in spectrum.iter().enumerate() {
         let height = value.clamp(0.0, 1.0) * (H - 18) as f32;
-        let start = i as f32 * W as f32 / spectrum.len() as f32;
-        let end = (i + 1) as f32 * W as f32 / spectrum.len() as f32;
+        let start = (scale.project_log_bin(i as f64 / spectrum.len() as f64) * W as f64) as f32;
+        let end = (scale.project_log_bin((i + 1) as f64 / spectrum.len() as f64) * W as f64) as f32;
         let gutter = (end - start) * 0.15;
         canvas.rect(start + gutter, H as f32 - height, end - start - 2.0 * gutter, height, spectrum_fill);
     }
@@ -304,9 +418,8 @@ fn render(curve: Option<&Path>, axis: GainAxis, offset: f64, bypass: bool, spect
         let y = (axis.y(db - offset) * (H - 1) as f64).round() as f32;
         canvas.rect(0.0, y, W as f32, 1.0, if index == 0 { PLOT_ZERO } else { PLOT_GRID });
     }
-    for f in [20.0_f64, 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0, 20000.0] {
-        let (normalized_x, _) = position(f, 0.0);
-        let x = (normalized_x * (W - 1) as f64).round() as f32;
+    for &frequency in scale.grid_frequencies() {
+        let x = (scale.x(f64::from(frequency)) * (W - 1) as f64).round() as f32;
         canvas.rect(x, 0.0, 1.0, H as f32, PLOT_GRID);
     }
     if let Some(path) = curve {
@@ -340,6 +453,45 @@ mod tests {
     }
 
     const TEST_SIZE: RasterSize = RasterSize { width: W as u32, height: H as u32 };
+
+    #[test]
+    fn linear_scale_reprojects_the_spline_and_its_editing_coordinates() {
+        let mut config = Config::flat_spline();
+        assert!(config.add_peak(25.0, -12.0));
+        assert!(config.add_peak(1000.0, 12.0));
+        let mut graph = GraphCache::default();
+        let logarithmic = graph.frame(&config, &[], 48000.0, TEST_SIZE).unwrap();
+        graph.update_dots(&config);
+        let log_point = graph.dots[2];
+
+        let scale = FrequencyScale::Linear;
+        graph.set_frequency_scale(scale);
+        let linear = graph.frame(&config, &[], 48000.0, TEST_SIZE).unwrap();
+        graph.update_dots(&config);
+        let point = graph.dots[2];
+        assert_ne!(linear.as_bytes(), logarithmic.as_bytes());
+        assert!(log_point.x > 0.5 && point.x < 0.05);
+        assert_eq!(point.y, log_point.y);
+        assert!((scale.project_log_bin(log_point.x) - point.x).abs() < 1e-12);
+        assert_eq!(hit_band(&graph.dots, point.x, point.y, W as f64, H as f64), Some(2));
+        let path = graph.curve_path.as_ref().unwrap().points();
+        assert_eq!(path[1].x, (scale.x(25.0) * W as f64) as f32);
+        assert_eq!(path[1].y, (graph.axis.y(-12.0) * H as f64) as f32);
+        let center_frequency = scale.response_frequencies()[W / 2];
+        let center_gain = crate::spline::gain_at(&config.bands, center_frequency);
+        assert!(path.iter().any(|sample| sample.x == (scale.x(center_frequency) * W as f64) as f32
+            && sample.y == (graph.axis.y(center_gain) * H as f64) as f32));
+        assert_eq!(graph.axis.band_values(scale, 0.5, 0.5), (10010.0, 0.0));
+
+        graph.set_frequency_scale(FrequencyScale::Logarithmic);
+        let restored = graph.frame(&config, &[], 48000.0, TEST_SIZE).unwrap();
+        assert_eq!(restored.as_bytes(), logarithmic.as_bytes());
+
+        let mut drag = BandDrag::new(2, &config.bands[2]).with_axes(graph.axis, scale);
+        assert!(drag.update(&mut config, scale.x(2500.0) - point.x, 0.0));
+        assert_eq!(config.bands[2].frequency_hz, 2500.0);
+        assert_eq!(config.bands[2].gain_db, 12.0);
+    }
 
     #[test]
     fn switching_to_spline_preserves_the_parametric_curve() {
@@ -421,7 +573,7 @@ mod tests {
         let axis = GainAxis::default();
         let gain = MAX_GAIN_DB - axis.span() * 119.75 / (H - 1) as f64;
         let path = response_path(&vec![gain; W], axis).unwrap();
-        let image = render(Some(&path), axis, 0.0, false, &[], TEST_SIZE, colors);
+        let image = render(Some(&path), axis, FrequencyScale::Logarithmic, 0.0, false, &[], TEST_SIZE, colors);
         let pixel = |y: usize| {
             let offset = (y * W + 8) * 4;
             &image.as_bytes()[offset..offset + 3]
@@ -436,18 +588,20 @@ mod tests {
     fn drag_mapping_round_trips_and_clamps() {
         let (x, y) = position(1200.0, -9.5);
         let axis = GainAxis::default();
-        assert_eq!(axis.band_values(x, y), (1200.0, -9.5));
-        assert_eq!(axis.band_values(-0.2, 1.2), (20.0, -24.0));
-        assert_eq!(axis.band_values(1.2, -0.2), (20000.0, 24.0));
+        assert_eq!(axis.band_values(FrequencyScale::Logarithmic, x, y), (1200.0, -9.5));
+        assert_eq!(axis.band_values(FrequencyScale::Logarithmic, -0.2, 1.2), (20.0, -24.0));
+        assert_eq!(axis.band_values(FrequencyScale::Logarithmic, 1.2, -0.2), (20000.0, 24.0));
     }
 
     #[test]
     fn one_axis_drag_preserves_the_other_parameter_at_full_precision() {
         let (frequency, gain) = (1000.222, 3.873);
         let axis = GainAxis::default();
-        assert_eq!(drag_values(frequency, gain, 0.0, -0.04, axis).0, frequency);
-        assert_eq!(drag_values(frequency, gain, 0.12, 0.0, axis).1, gain);
-        assert_eq!(drag_values(frequency, gain, 0.0, 0.0, axis), (frequency, gain));
+        for scale in [FrequencyScale::Logarithmic, FrequencyScale::Linear] {
+            assert_eq!(drag_values(frequency, gain, 0.0, -0.04, axis, scale).0, frequency);
+            assert_eq!(drag_values(frequency, gain, 0.12, 0.0, axis, scale).1, gain);
+            assert_eq!(drag_values(frequency, gain, 0.0, 0.0, axis, scale), (frequency, gain));
+        }
     }
 
     #[test]
@@ -466,9 +620,9 @@ mod tests {
         assert!(cache.update_dots(&cfg));
         assert_eq!(cache.output_bounds(), (-4.0, -2.0));
         assert_eq!(cache.dots[0].y, 0.25);
-        assert_eq!(cache.axis.band_values(0.5, 0.275).1, 0.45);
+        assert_eq!(cache.axis.band_values(cache.frequency_scale, 0.5, 0.275).1, 0.45);
 
-        let mut drag = BandDrag::new(0, &cfg.bands[0]).with_axis(cache.axis);
+        let mut drag = BandDrag::new(0, &cfg.bands[0]).with_axes(cache.axis, cache.frequency_scale);
         assert!(drag.update(&mut cfg, 0.0, -0.0025));
         assert_eq!(cfg.bands[0].gain_db, 0.505);
     }
@@ -575,7 +729,7 @@ mod tests {
             assert_eq!(cache.output_bounds(), (preamp - 24.0, preamp + 24.0));
             assert_eq!(cache.zero_position(), (24.0 + preamp) / 48.0);
             for (dot, band) in cache.dots.iter().zip(&cfg.bands) {
-                assert_eq!(cache.axis.band_values(dot.x, dot.y), (band.frequency_hz, band.gain_db));
+                assert_eq!(cache.axis.band_values(cache.frequency_scale, dot.x, dot.y), (band.frequency_hz, band.gain_db));
             }
         }
     }

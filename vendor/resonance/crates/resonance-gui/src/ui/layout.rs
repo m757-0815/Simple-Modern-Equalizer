@@ -10,6 +10,10 @@ use crate::ui::widgets::{padded_scroll, section, section_hint};
 use eframe::egui;
 use resonance_ipc::{DaemonState, service};
 
+// #######################################################
+// lay out desktop controls for the available width
+// #######################################################
+
 /// Default / fallback widths of the Effects & Devices side panels in the wide
 /// 3-column layout; EQ bands (central) takes whatever's left so its table is
 /// never the one that squishes.

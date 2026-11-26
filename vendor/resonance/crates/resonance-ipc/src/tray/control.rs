@@ -5,6 +5,10 @@ use crate::tray::{self, Ui};
 use std::io;
 use std::process::{Command, Stdio};
 
+// #######################################################
+// start the tray and open the requested client
+// #######################################################
+
 pub const TRAY_INSTANCE: &str = "resonance-tray";
 pub const GUI_INSTANCE: &str = "resonance-gui";
 pub const TUI_INSTANCE: &str = "resonance-tui";

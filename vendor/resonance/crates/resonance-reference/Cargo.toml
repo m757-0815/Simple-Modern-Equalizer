@@ -1,3 +1,7 @@
+#######################################################
+# build the measurement and reference curve library
+#######################################################
+
 [package]
 name = "resonance-reference"
 description = "Reference/measurement target curves + squig.link downloader (client-agnostic)"

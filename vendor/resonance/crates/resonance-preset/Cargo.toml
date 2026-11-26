@@ -1,3 +1,7 @@
+#######################################################
+# build the preset parsers and writers
+#######################################################
+
 [package]
 name = "resonance-preset"
 description = "Preset parsers: FxSound .fac and EqualizerAPO .txt formats"

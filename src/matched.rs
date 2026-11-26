@@ -14,6 +14,10 @@ pub fn latency_ms(sample_rate: u32) -> f64 {
     1000.0 * (lookahead_frames(sample_rate) + BLOCK) as f64 / f64::from(sample_rate)
 }
 
+// #######################################################
+// model the analog response of each band
+// #######################################################
+
 struct Prototype {
     center: f64,
     prewarp: f64,
@@ -78,6 +82,10 @@ pub fn response_db(
         })
         .collect()
 }
+
+// #######################################################
+// build the short matched-phase correction
+// #######################################################
 
 pub fn kernel(bands: &[BandState], spline_points: &[Band], sample_rate: u32) -> Vec<f64> {
     let rate = f64::from(sample_rate);

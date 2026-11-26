@@ -5,6 +5,10 @@ use serde::{Deserialize, Serialize};
 const SAMPLES: usize = 1025;
 pub const TOLERANCE_DB: f64 = 0.15;
 
+// #######################################################
+// store the target curve and reuse completed fits
+// #######################################################
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Target {
     rate: u32,
@@ -57,6 +61,10 @@ fn set_fitted_mode(config: &mut Config, bands: Vec<Band>) {
     config.spline_source = None;
     config.other_mode_bands = None;
 }
+
+// #######################################################
+// fit the target when switching EQ editors
+// #######################################################
 
 pub fn convert(mut config: Config, rate: u32) -> (Config, f64) {
     let frequencies: Vec<_> = (0..SAMPLES).map(|index| {
@@ -170,6 +178,10 @@ fn max_error(actual: &[f64], target: &[f64]) -> f64 {
     actual.iter().zip(target).map(|(actual, target)| (actual - target).abs()).fold(0.0, f64::max)
 }
 
+// #######################################################
+// choose spline points for the target curve
+// #######################################################
+
 // Shortest path through the sampled knots. Every admissible edge represents a
 // spline segment inside the error limit. Ascending indices resolve tied paths.
 fn spline_knots(db: &[f64], tolerance: f64) -> Option<Vec<usize>> {
@@ -227,6 +239,10 @@ fn fit_spline(frequencies: &[f64], db: &[f64]) -> Vec<Band> {
         frequency_hz: frequencies[index], gain_db: db[index], edited: Some(true), ..Band::flat(0, 1)
     }).collect()
 }
+
+// #######################################################
+// refine the parametric approximation
+// #######################################################
 
 struct ParametricFit<'a> {
     frequencies: &'a [f64],

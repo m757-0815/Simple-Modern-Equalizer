@@ -9,7 +9,9 @@ pub trait Effect: Send {
     fn set_enabled(&mut self, on: bool);
 }
 
-// ── Shared helpers ────────────────────────────────────────────────────────────
+// #######################################################
+// Shared helpers
+// #######################################################
 
 /// 2nd-order Butterworth HP biquad coefficients (Audio EQ Cookbook).
 /// Returns (b0, b1, b2, a1, a2) already divided by a0.
@@ -41,7 +43,9 @@ fn biquad_tick(x: f64, state: &mut [f64; 2], b0: f64, b1: f64, b2: f64, a1: f64,
     y
 }
 
-// ── Fidelity — FxSound Aural exciter ──────────────────────────────────────────
+// #######################################################
+// Fidelity — FxSound Aural exciter
+// #######################################################
 //
 // Matches FxSound's `dspsAural`: a 2nd-order Butterworth HP isolates the high
 // band, which is driven and added back via an odd-harmonic generator.
@@ -132,7 +136,9 @@ impl Effect for FidelityEffect {
     }
 }
 
-// ── Ambience — Freeverb (Schroeder–Moorer) reverb ─────────────────────────────
+// #######################################################
+// Ambience — Freeverb (Schroeder–Moorer) reverb
+// #######################################################
 //
 // The classic, well-behaved public-domain reverb: 8 parallel damped comb
 // filters per channel feeding 4 series allpass diffusers, with the right
@@ -341,7 +347,9 @@ impl Effect for AmbienceEffect {
     }
 }
 
-// ── Surround — FxSound mid/side stereo widener ────────────────────────────────
+// #######################################################
+// Surround — FxSound mid/side stereo widener
+// #######################################################
 //
 // Matches FxSound's `Wide32`: a full-band mid/side widener with mono-level
 // compensation (no HP filter — the previous bass-protected version widened
@@ -413,7 +421,9 @@ impl Effect for SurroundEffect {
     }
 }
 
-// ── Dynamic Boost — loudness maximizer (makeup + lookahead brickwall) ─────────
+// #######################################################
+// Dynamic Boost — loudness maximizer (makeup + lookahead brickwall)
+// #######################################################
 //
 // Applies makeup gain to raise overall loudness, then a lookahead peak limiter
 // holds the output below a ceiling. Unlike the previous version it does NOT
@@ -542,7 +552,9 @@ impl Effect for DynamicBoostEffect {
     }
 }
 
-// ── Bass Boost — peaking (bell) biquad at 90 Hz, bipolar ──────────────────────
+// #######################################################
+// Bass Boost — peaking (bell) biquad at 90 Hz, bipolar
+// #######################################################
 //
 // FxSound Play bass component: Audio EQ Cookbook peaking EQ.
 //   center 90 Hz, Q 2.5, gain = intensity · 15 dB.
@@ -631,7 +643,9 @@ impl Effect for BassBoostEffect {
     }
 }
 
-// ── Crossfeed — Bauer/Meier headphone crossfeed ───────────────────────────────
+// #######################################################
+// Crossfeed — Bauer/Meier headphone crossfeed
+// #######################################################
 //
 // Each ear also hears an attenuated, low-passed copy of the opposite channel.
 // The low-pass stands in for the frequency-dependent head shadow (an ITD/ILD
@@ -649,6 +663,7 @@ impl Effect for BassBoostEffect {
 
 const CROSSFEED_CUTOFF_HZ: f64 = 700.0; // head-shadow low-pass corner
 const CROSSFEED_LEVEL_MAX: f64 = 0.5; // opposite-ear mix at full intensity
+const CROSSFEED_RAMP_SECONDS: f64 = 0.01;
 
 #[derive(Debug, Clone)]
 pub struct CrossfeedEffect {
@@ -656,6 +671,8 @@ pub struct CrossfeedEffect {
     enabled: bool,
     alpha: f64,
     lp: Vec<f64>, // one-pole low-pass state, one per channel
+    applied_level: Option<f64>,
+    level_step: f64,
 }
 
 impl CrossfeedEffect {
@@ -670,17 +687,23 @@ impl CrossfeedEffect {
             enabled: true,
             alpha,
             lp: vec![0.0; channels.max(2)],
+            applied_level: None,
+            level_step: CROSSFEED_LEVEL_MAX / (sample_rate * CROSSFEED_RAMP_SECONDS).max(1.0),
         }
     }
 }
 
 impl Effect for CrossfeedEffect {
     fn process(&mut self, samples: &mut [f64], channels: usize) {
-        if !self.enabled || self.intensity == 0.0 || channels < 2 {
+        if channels < 2 {
             return;
         }
-        let level = self.intensity * CROSSFEED_LEVEL_MAX;
-        let norm = 1.0 / (1.0 + level);
+        let target = if self.enabled { self.intensity * CROSSFEED_LEVEL_MAX } else { 0.0 };
+        let mut level = *self.applied_level.get_or_insert(target);
+        if level == 0.0 && target == 0.0 {
+            return;
+        }
+        let mut norm = 1.0 / (1.0 + level);
         let frames = samples.len() / channels;
         for frame in 0..frames {
             let il = frame * channels;
@@ -692,11 +715,26 @@ impl Effect for CrossfeedEffect {
             self.lp[1] += self.alpha * (r - self.lp[1]);
             samples[il] = (l + level * self.lp[1]) * norm;
             samples[ir] = (r + level * self.lp[0]) * norm;
+            // Ramp live changes after writing the current frame to keep the boundary continuous.
+            if level != target {
+                let difference = target - level;
+                level = if difference.abs() <= self.level_step {
+                    target
+                } else {
+                    level + self.level_step.copysign(difference)
+                };
+                norm = 1.0 / (1.0 + level);
+            }
+        }
+        self.applied_level = Some(level);
+        if level == 0.0 {
+            self.lp.fill(0.0);
         }
     }
 
     fn reset(&mut self) {
         self.lp.iter_mut().for_each(|s| *s = 0.0);
+        self.applied_level = None;
     }
 
     fn set_intensity(&mut self, v: f64) {

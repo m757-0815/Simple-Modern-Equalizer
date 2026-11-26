@@ -3,6 +3,11 @@
 # has passwordless sudo in the throwaway VM). Idempotent. Needs the Command Line
 # Tools (`xcode-select --install`, done by hand during image creation) because the
 # guest has no Homebrew (it dropped Intel support): BlackHole comes from the vendor pkgs.
+
+#######################################################
+# prepare the macOS guest for audio capture tests
+#######################################################
+
 set -euo pipefail
 SRC="${SRC:-$HOME/resonance}"
 BH_VERSION=0.7.0

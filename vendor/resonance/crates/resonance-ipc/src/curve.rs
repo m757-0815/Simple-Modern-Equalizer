@@ -176,7 +176,9 @@ impl RefCurve {
     }
 }
 
-// ── Parametric target generation ────────────────────────────────────────────
+// #######################################################
+// Parametric target generation
+// #######################################################
 
 /// A shaping filter used to *build* a target curve (low-shelf bass, ear-gain
 /// peak, treble high-shelf). Mirrors the three-filter model used by the `PEQdB`

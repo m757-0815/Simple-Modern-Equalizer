@@ -17,6 +17,10 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+// #######################################################
+// prepare reusable inputs for the live audio tests
+// #######################################################
+
 #[derive(Debug, Clone)]
 pub struct Recording {
     pub node: String,

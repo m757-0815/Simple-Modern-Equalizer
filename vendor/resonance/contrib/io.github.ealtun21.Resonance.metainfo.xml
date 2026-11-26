@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
+
+<!-- ####################################################### -->
+<!-- describe Resonance to desktop software catalogs -->
+<!-- ####################################################### -->
+
 <component type="desktop-application">
   <id>io.github.ealtun21.Resonance</id>
   <metadata_license>CC0-1.0</metadata_license>

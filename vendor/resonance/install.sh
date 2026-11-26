@@ -29,6 +29,11 @@
 #   FROM_SOURCE=1              force source build even inside a checkout
 #   PACMAN_BUILD=1             on Arch, build a pacman-tracked package from source
 #   NO_PACMAN=1                on Arch, skip pacman and use the plain prebuilt binaries
+
+#######################################################
+# choose the platform artifacts and install Resonance
+#######################################################
+
 set -euo pipefail
 
 REPO="ealtun21/resonance"

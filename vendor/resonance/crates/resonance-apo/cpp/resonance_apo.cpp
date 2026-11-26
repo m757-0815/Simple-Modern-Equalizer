@@ -22,6 +22,11 @@
 #include <cstdarg>
 
 // {7C3D2A1E-9B6F-4E2A-8D5C-1F0A3B4C5D6E}
+
+// #######################################################
+// join the Windows audio effect interfaces to the Rust engine
+// #######################################################
+
 DEFINE_GUID(CLSID_ResonanceAPO, 0x7c3d2a1e, 0x9b6f, 0x4e2a, 0x8d, 0x5c, 0x1f, 0x0a,
             0x3b, 0x4c, 0x5d, 0x6e);
 

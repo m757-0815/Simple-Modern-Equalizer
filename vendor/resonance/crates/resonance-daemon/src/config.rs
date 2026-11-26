@@ -175,7 +175,9 @@ impl Profile {
     }
 }
 
-// ── Paths ────────────────────────────────────────────────────────────────────
+// #######################################################
+// Paths
+// #######################################################
 
 /// Platform-aware config dir. Re-exported through the daemon to keep callers
 /// simple — defers to the shared `resonance_ipc::paths::config_dir`.
@@ -225,7 +227,9 @@ fn known_sinks_path() -> PathBuf {
     config_dir().join("known_sinks.toml")
 }
 
-// ── Profile I/O ──────────────────────────────────────────────────────────────
+// #######################################################
+// Profile I/O
+// #######################################################
 
 pub fn save_profile(name: &str, profile: &Profile) -> Result<(), String> {
     let dir = profiles_dir();
@@ -299,7 +303,9 @@ pub fn list_profiles() -> Vec<String> {
     names
 }
 
-// ── Mappings (output node.name → profile name) ───────────────────────────────
+// #######################################################
+// Mappings (output node.name → profile name)
+// #######################################################
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Mappings {
@@ -341,7 +347,9 @@ impl Mappings {
     }
 }
 
-// ── Known sinks (every output device ever seen → its friendly description) ────
+// #######################################################
+// Known sinks (every output device ever seen → its friendly description)
+// #######################################################
 //
 // PipeWire only reports the *currently present* sinks. Once a device unplugs we
 // lose its `node.description`, so any output→profile mapping for it would render

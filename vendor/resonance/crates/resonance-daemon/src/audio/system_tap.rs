@@ -809,7 +809,9 @@ fn build_aggregate_dict(
     dict
 }
 
-// ── Private TCC API: explicit audio-capture permission request ─────────────
+// #######################################################
+// Private TCC API: explicit audio-capture permission request
+// #######################################################
 //
 // macOS gates `AudioHardwareCreateProcessTap` behind a TCC service
 // (`kTCCServiceAudioCapture`) that has no public preflight/request API.

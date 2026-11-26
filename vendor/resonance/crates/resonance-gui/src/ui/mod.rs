@@ -3,6 +3,10 @@
 //! helpers. Each submodule hangs `impl GuiApp` methods (or free helper fns) off
 //! the type defined in [`crate::app`].
 
+// #######################################################
+// expose the desktop UI panels
+// #######################################################
+
 pub(crate) mod apps;
 pub(crate) mod bands;
 pub(crate) mod curve_view;

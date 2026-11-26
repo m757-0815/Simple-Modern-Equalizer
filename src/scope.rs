@@ -3,6 +3,10 @@ use resonance_ipc::transport::SyncClient;
 pub const MODE: i32 = 1;
 pub const CAPTURE_FRAMES: u32 = 8192;
 
+// #######################################################
+// size the waveform capture and align it to a crossing
+// #######################################################
+
 pub fn waveform_capture_frames(rate: f64) -> u32 {
     // Twenty milliseconds of display with room for trigger alignment.
     (rate / 35.0).ceil().clamp(2.0, f64::from(CAPTURE_FRAMES)) as u32
@@ -35,6 +39,10 @@ pub fn window(samples: &[f32], rate: f64) -> Vec<f32> {
     samples[start..start + length].to_vec()
 }
 
+// #######################################################
+// read output audio from the daemon
+// #######################################################
+
 #[cfg(not(windows))]
 #[derive(Default)]
 pub struct Capture;
@@ -47,7 +55,7 @@ impl Capture {
         state: &resonance_ipc::DaemonState,
         enabled: bool,
         frames: u32,
-        _stereo_requested: bool,
+        _stereo_frames: usize,
     ) -> Option<Audio> {
         use resonance_ipc::{Command, Response};
         if !enabled {
@@ -63,11 +71,16 @@ impl Capture {
     }
 }
 
+// #######################################################
+// read output audio from WASAPI loopback on Windows
+// #######################################################
+
 #[cfg(windows)]
 mod windows {
     use super::*;
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
     use cpal::{FromSample, Sample, SampleFormat, SizedSample, Stream, StreamConfig};
+    use resonance_dsp::true_peak::Meter;
     use std::collections::VecDeque;
     use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
     use std::time::{Duration, Instant};
@@ -86,7 +99,7 @@ mod windows {
             state: &resonance_ipc::DaemonState,
             enabled: bool,
             frames: u32,
-            stereo_requested: bool,
+            stereo_frames: usize,
         ) -> Option<Audio> {
             if !enabled {
                 *self = Self::default();
@@ -104,7 +117,18 @@ mod windows {
                 self.retry_after = Some(Instant::now() + Duration::from_secs(1));
                 self.loopback = Loopback::start();
             }
-            self.loopback.as_ref().map(|loopback| loopback.audio(frames, stereo_requested))
+            self.loopback.as_ref().map(|loopback| loopback.audio(frames, stereo_frames))
+        }
+
+        pub fn true_peak(&self, active: bool, reset: bool) -> Option<[f32; 2]> {
+            let mut buffer = self.loopback.as_ref()?.buffer.lock().unwrap();
+            // Only run the interpolator while the True Peak view is active.
+            if !active {
+                buffer.true_peak = None;
+                return None;
+            }
+            let peaks = buffer.true_peak.get_or_insert_with(Meter::default).take_peaks();
+            if reset { None } else { peaks }
         }
     }
 
@@ -120,6 +144,7 @@ mod windows {
         stereo: VecDeque<[f32; 2]>,
         updated: Option<Instant>,
         levels: ([f32; 2], f32),
+        true_peak: Option<Meter>,
     }
 
     impl Loopback {
@@ -132,9 +157,10 @@ mod windows {
             }
             let buffer = Arc::new(Mutex::new(Buffer {
                 samples: VecDeque::with_capacity(CAPTURE_FRAMES as usize),
-                stereo: VecDeque::with_capacity(crate::monitor::FIELD_FRAMES),
+                stereo: VecDeque::with_capacity(CAPTURE_FRAMES as usize),
                 updated: None,
                 levels: ([0.0; 2], 0.0),
+                true_peak: None,
             }));
             let failed = Arc::new(AtomicBool::new(false));
             let stream = match format.sample_format() {
@@ -148,14 +174,15 @@ mod windows {
             Some(Self { _stream: stream, rate: f64::from(config.sample_rate), buffer, failed })
         }
 
-        fn audio(&self, frames: u32, stereo_requested: bool) -> Audio {
+        fn audio(&self, frames: u32, stereo_frames: usize) -> Audio {
             let mut buffer = self.buffer.lock().unwrap();
             if buffer.updated.is_none_or(|updated| updated.elapsed() >= Duration::from_millis(150)) {
                 buffer.samples.clear();
                 buffer.stereo.clear();
                 return Audio { samples: Vec::new(), rate: self.rate, levels: None, stereo: Vec::new() };
             }
-            let stereo = if stereo_requested { buffer.stereo.iter().copied().collect() } else { Vec::new() };
+            let stereo_start = buffer.stereo.len().saturating_sub(stereo_frames);
+            let stereo = buffer.stereo.iter().skip(stereo_start).copied().collect();
             let start = buffer.samples.len().saturating_sub(frames as usize);
             Audio { samples: buffer.samples.iter().skip(start).copied().collect(), rate: self.rate, levels: Some(buffer.levels), stereo }
         }
@@ -173,17 +200,28 @@ mod windows {
         let channels = usize::from(config.channels);
         let buffer = Arc::clone(buffer);
         let failed = Arc::clone(failed);
+        let mut gap = true;
         // On WASAPI, an input stream on the render device captures its loopback.
         device.build_input_stream(
             config,
             move |samples: &[T], _| {
                 if let Ok(mut buffer) = buffer.try_lock() {
                     if samples.len() < channels { return; }
+                    // Start with fresh history after a missed buffer or a pause.
+                    if gap || buffer.updated.is_none_or(|last| last.elapsed() >= Duration::from_millis(150)) {
+                        if let Some(meter) = buffer.true_peak.as_mut() {
+                            meter.reset_history();
+                        }
+                    }
+                    gap = false;
                     let mut squares = [0.0; 2];
                     let mut peak = 0.0_f32;
                     for frame in samples.chunks_exact(channels) {
                         let left = f32::from_sample(frame[0]);
                         let right = f32::from_sample(frame[if channels > 1 { 1 } else { 0 }]);
+                        if let Some(meter) = buffer.true_peak.as_mut() {
+                            meter.push([left, right]);
+                        }
                         squares[0] += left * left;
                         squares[1] += right * right;
                         let sum = frame.iter().map(|&sample| {
@@ -195,7 +233,7 @@ mod windows {
                             buffer.samples.pop_front();
                         }
                         buffer.samples.push_back(sum / channels as f32);
-                        if buffer.stereo.len() == crate::monitor::FIELD_FRAMES {
+                        if buffer.stereo.len() == CAPTURE_FRAMES as usize {
                             buffer.stereo.pop_front();
                         }
                         buffer.stereo.push_back([left, right]);
@@ -203,6 +241,8 @@ mod windows {
                     let frames = (samples.len() / channels) as f32;
                     buffer.levels = (squares.map(|s| (s / frames).sqrt()), peak);
                     buffer.updated = Some(Instant::now());
+                } else {
+                    gap = true;
                 }
             },
             move |_| failed.store(true, Ordering::Relaxed),

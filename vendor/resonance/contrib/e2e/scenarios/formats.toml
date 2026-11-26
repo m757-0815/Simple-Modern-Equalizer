@@ -1,4 +1,9 @@
 # Flat chain across every rate × width: bit-exact, no resampling anywhere.
+
+#######################################################
+# check the supported channel layouts and rates
+#######################################################
+
 [[scenario]]
 id = "flat"
 tier = "full"
