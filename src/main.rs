@@ -731,6 +731,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Resolve desktop autostart before isolating the engine's config.
     #[cfg(target_os = "linux")]
     let login_entry = config_home().join("autostart/simple-modern-equalizer.desktop");
+    #[cfg(target_os = "linux")]
+    let flatpak_id = std::env::var("FLATPAK_ID").ok();
     let directory = data_directory();
     fs::create_dir_all(directory.join("presets"))?;
     let Some(_instance) = storage::lock_instance(&directory)? else {
@@ -744,10 +746,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .show();
         return Ok(());
     };
+    let engine_socket = directory.join("engine.sock");
+    #[cfg(target_os = "linux")]
+    let engine_socket = match (flatpak_id.as_deref(), std::env::var_os("XDG_RUNTIME_DIR")) {
+        (Some(id), Some(runtime)) => {
+            // Flatpak config paths can exceed the Unix socket path limit.
+            let runtime = PathBuf::from(runtime).join("app").join(id);
+            fs::create_dir_all(&runtime)?;
+            runtime.join("engine.sock")
+        }
+        _ => engine_socket,
+    };
     // Before any UI/worker threads exist: isolate our IPC endpoint and engine
     // preferences. Windows APO registration is still the vendored engine's ID.
     unsafe {
-        std::env::set_var("RESONANCE_SOCKET", directory.join("engine.sock"));
+        std::env::set_var("RESONANCE_SOCKET", engine_socket);
         std::env::set_var("XDG_CONFIG_HOME", directory.join("engine-config"));
     }
     let flat = Config::flat_spline();
@@ -783,15 +796,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ui = MainWindow::new()?;
     #[cfg(target_os = "linux")]
     {
-        slint::set_xdg_app_id("simple-modern-equalizer")?;
-        ui.set_has_login_start(true);
-        ui.set_login_start(autostart::enabled(&login_entry));
-        ui.on_change_login_start(move |enabled| {
-            match autostart::set_enabled(&login_entry, enabled) {
-                Ok(()) => "".into(),
-                Err(error) => format!("Could not update login startup. {error}").into(),
-            }
-        });
+        slint::set_xdg_app_id(flatpak_id.as_deref().unwrap_or("simple-modern-equalizer"))?;
+        if flatpak_id.is_none() {
+            ui.set_has_login_start(true);
+            ui.set_login_start(autostart::enabled(&login_entry));
+            ui.on_change_login_start(move |enabled| {
+                match autostart::set_enabled(&login_entry, enabled) {
+                    Ok(()) => "".into(),
+                    Err(error) => format!("Could not update login startup. {error}").into(),
+                }
+            });
+        }
     }
     configure_color_picker(&ui);
     ui.set_app_version(env!("CARGO_PKG_VERSION").into());
