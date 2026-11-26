@@ -140,6 +140,27 @@ jobs:
           if-no-files-found: error
 
   #######################################################
+  # build the Linux Flatpak bundle
+  #######################################################
+
+  flatpak:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+      - name: Build Flatpak
+        run: sh scripts/build-flatpak.sh
+      - name: Upload Linux Flatpak
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/Simple-Modern-Equalizer-x86_64.flatpak
+          archive: false
+          if-no-files-found: error
+
+  #######################################################
   # archive the tracked sources
   #######################################################
 
@@ -154,3 +175,75 @@ jobs:
           path: Simple-Modern-Equalizer-source.tar.gz
           archive: false
           if-no-files-found: error
+
+  #######################################################
+  # publish installers after all tagged builds succeed
+  #######################################################
+
+  publish:
+    name: Publish GitHub release
+    if: github.event_name == 'push' && github.ref_type == 'tag' && !github.event.deleted
+    needs: [windows, appimage, fedora, deb, flatpak, source]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    concurrency:
+      group: publish-release-${{ github.ref }}
+    steps:
+      - name: Download the built packages
+        uses: actions/download-artifact@v8
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Publish the release
+        shell: bash
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          shopt -s failglob
+          assets=(
+            release-assets/Simple-Modern-Equalizer-x86_64.AppImage
+            release-assets/Simple-Modern-Equalizer-x86_64.flatpak
+            release-assets/simple-modern-equalizer-*.fc44.x86_64.rpm
+            release-assets/simple-modern-equalizer_*+ubuntu24.04_amd64.deb
+            release-assets/simple-modern-equalizer_*+debian13_amd64.deb
+            release-assets/SimpleModernEqualizer-Setup-x64.msi
+            release-assets/Simple-Modern-Equalizer-source.tar.gz
+          )
+          if (( ${#assets[@]} != 7 )); then
+            printf 'Expected seven release assets, found %s.\n' "${#assets[@]}" >&2
+            exit 1
+          fi
+          for asset in "${assets[@]}"; do
+            if [[ ! -f "$asset" || ! -s "$asset" ]]; then
+              printf 'Missing or empty release asset: %s\n' "$asset" >&2
+              exit 1
+            fi
+          done
+
+          # Reuse a draft if an upload was interrupted.
+          draft=$(gh api --paginate "repos/$GH_REPO/releases?per_page=100" \
+            --jq '.[] | [.tag_name, .draft] | @tsv' |
+            awk -F '\t' -v tag="$RELEASE_TAG" '$1 == tag { print $2 }')
+          case "$draft" in
+            false)
+              printf 'Release %s is already published.\n' "$RELEASE_TAG"
+              ;;
+            true)
+              gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
+              gh release edit "$RELEASE_TAG" --draft=false
+              ;;
+            '')
+              flags=(--verify-tag --generate-notes)
+              if [[ "${RELEASE_TAG%%+*}" == *-* ]]; then
+                flags+=(--prerelease)
+              fi
+              gh release create "$RELEASE_TAG" "${flags[@]}" "${assets[@]}"
+              ;;
+            *)
+              printf 'Found multiple releases for %s.\n' "$RELEASE_TAG" >&2
+              exit 1
+              ;;
+          esac

@@ -1,0 +1,62 @@
+id: io.github.m757_0815.simple-modern-equalizer
+runtime: org.freedesktop.Platform
+runtime-version: '26.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+  - org.freedesktop.Sdk.Extension.llvm22
+command: simple-modern-equalizer
+rename-desktop-file: simple-modern-equalizer.desktop
+rename-icon: simple-modern-equalizer
+
+#######################################################
+# connect to the desktop and host PipeWire session
+#######################################################
+
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --filesystem=xdg-run/pipewire-0:ro
+  - --talk-name=org.mpris.MediaPlayer2.*
+
+#######################################################
+# build the app and its audio daemon with vendored crates
+#######################################################
+
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/llvm22/bin
+  env:
+    CARGO_BUILD_JOBS: '4'
+    CARGO_TARGET_DIR: /run/build/simple-modern-equalizer/target
+    LIBCLANG_PATH: /usr/lib/sdk/llvm22/lib
+
+modules:
+  - name: simple-modern-equalizer
+    buildsystem: simple
+    build-commands:
+      - cargo build --release --locked --offline --bin simple-modern-equalizer
+      - cargo build --release --locked --offline --manifest-path vendor/resonance/Cargo.toml -p resonance-daemon
+      - install -Dm755 -t /app/bin target/release/simple-modern-equalizer target/release/resonanced
+      - install -Dm644 packaging/simple-modern-equalizer.desktop /app/share/applications/simple-modern-equalizer.desktop
+      - sed -i "s/^StartupWMClass=.*/StartupWMClass=$FLATPAK_ID/" /app/share/applications/simple-modern-equalizer.desktop
+      - install -Dm644 ui/icons/app-icon.png /app/share/icons/hicolor/256x256/apps/simple-modern-equalizer.png
+      - install -Dm644 "packaging/flatpak/$FLATPAK_ID.metainfo.xml" "/app/share/metainfo/$FLATPAK_ID.metainfo.xml"
+      - install -Dm644 -t /app/share/licenses/simple-modern-equalizer LICENSE THIRD_PARTY_NOTICES.md
+      - install -Dm644 ui/fonts/OFL.txt /app/share/licenses/simple-modern-equalizer/Inter-OFL.txt
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - .git
+          - dist
+          - target
+          - vendor/resonance/target
+      - type: dir
+        path: ../../dist/flatpak-build/cargo-vendor
+        dest: cargo-vendor
+      - type: file
+        path: ../../dist/flatpak-build/cargo-config.toml
+        dest: .cargo
+        dest-filename: config.toml

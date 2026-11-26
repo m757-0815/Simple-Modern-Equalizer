@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.m757_0815.simple-modern-equalizer</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>Simple Modern Equalizer</name>
+  <summary>System-wide audio equalizer for headphones and speakers</summary>
+  <developer id="io.github.m757_0815">
+    <name>Maximilian Hachen</name>
+  </developer>
+  <description>
+    <p>Adjust bass, midrange, and treble across your PipeWire session. Load a
+      headphone preset or import Equalizer APO settings to start from an
+      existing tuning.</p>
+    <p>Use the parametric or spline editor to shape the response in more detail.
+      The live monitor can show the signal before and after EQ.</p>
+  </description>
+  <launchable type="desktop-id">io.github.m757_0815.simple-modern-equalizer.desktop</launchable>
+  <categories>
+    <category>AudioVideo</category>
+    <category>Audio</category>
+  </categories>
+  <url type="homepage">https://github.com/m757-0815/Simple-Modern-Equalizer</url>
+  <url type="bugtracker">https://github.com/m757-0815/Simple-Modern-Equalizer/issues</url>
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/m757-0815/Simple-Modern-Equalizer/v0.1.16/docs/screenshots/standard.png</image>
+      <caption>Parametric equalizer and live audio monitor</caption>
+    </screenshot>
+  </screenshots>
+  <releases>
+    <release version="0.1.16" date="2026-11-24"/>
+  </releases>
+  <content_rating type="oars-1.1"/>
+</component>

@@ -1,33 +1,38 @@
 # Simple Modern Equalizer for Linux and Windows
 
-Simple Modern Equalizer is a free, open-source system-wide audio equalizer for headphones and speakers. Adjust bass, midrange, and treble, edit parametric EQ bands or spline curves, and monitor your audio live. The app uses PipeWire on Linux and imports Equalizer APO presets.
+Simple Modern Equalizer is a free, open-source system-wide EQ for headphones and speakers. On Linux it uses PipeWire to equalize audio from your apps. Load a headphone preset, adjust bass, midrange, and treble in **Simple**, or shape a parametric EQ or spline curve in **Standard**.
 
-[Download installers](#downloads) · [Equalizer features](#equalizer-features) · [Build from source](#build-from-source)
+[Linux downloads](#downloads) · [Try a headphone preset](#try-a-headphone-preset) · [Windows installer](#windows-x64-installer) · [Build from source](#build-from-source)
 
-| Parametric EQ with before / after monitoring | Tone controls with a live oscilloscope |
-| --- | --- |
-| [![Parametric audio equalizer with three editable bands and a before / after spectrum](docs/screenshots/standard.png)](docs/screenshots/standard.png) | [![Bass, midrange, and treble controls with a live audio oscilloscope](docs/screenshots/simple.png)](docs/screenshots/simple.png) |
-
-## Install
+## Install on Linux
 
 ### Downloads
 
-Sign in to GitHub, open a successful **Build installers** run, and download your package from **Artifacts**. New runs offer the files individually. [Build installers runs](https://github.com/m757-0815/Simple-Modern-Equalizer/actions/workflows/package.yml)
+Published versions appear on [GitHub Releases][releases] with public downloads. You can also sign in to GitHub to download the v0.1.16 build for your system below.
 
-| Target | Package |
+| Linux x86-64 | Download |
 | --- | --- |
-| Windows x86-64 MSI | `SimpleModernEqualizer-Setup-x64.msi` |
-| Linux x86-64 AppImage | `Simple-Modern-Equalizer-x86_64.AppImage` |
-| Fedora 44 x86-64 RPM | `simple-modern-equalizer-*.x86_64.rpm` |
-| Ubuntu 24.04 x86-64 DEB | `simple-modern-equalizer_*+ubuntu24.04_amd64.deb` |
-| Debian 13 x86-64 DEB | `simple-modern-equalizer_*+debian13_amd64.deb` |
-| Source | `Simple-Modern-Equalizer-source.tar.gz` |
+| AppImage | [Download AppImage][appimage-download] |
+| Fedora 44 | [Download RPM][fedora-download] |
+| Ubuntu 24.04 | [Download Ubuntu DEB][ubuntu-download] |
+| Debian 13 | [Download Debian DEB][debian-download] |
 
-Local installer builds are in `dist/`.
+For Flatpak, see [Install the Flatpak bundle](#flatpak). For newer builds, check the [installer workflow runs][installer-builds] or [build from source](#build-from-source).
+
+### Flatpak
+
+Get `Simple-Modern-Equalizer-x86_64.flatpak` from a [GitHub release][releases] that includes the bundle, or [build it locally](#build-from-source). From the folder containing the bundle, run these commands.
+
+```sh
+flatpak install --user ./Simple-Modern-Equalizer-x86_64.flatpak
+flatpak run io.github.m757_0815.simple-modern-equalizer
+```
+
+The bundle needs a running PipeWire session and the Freedesktop 26.08 runtime. The installer offers to fetch the runtime from Flathub. Update the app by installing a newer bundle.
 
 ### Linux AppImage
 
-The x86-64 AppImage needs a running PipeWire session. Launch the app from the folder containing the AppImage.
+The AppImage needs a running PipeWire session. Open a terminal in the download folder and run these commands.
 
 ```sh
 chmod +x Simple-Modern-Equalizer-x86_64.AppImage
@@ -36,17 +41,28 @@ chmod +x Simple-Modern-Equalizer-x86_64.AppImage
 
 AppImages built on Fedora 44 require glibc 2.43 or later.
 
-### Ubuntu 24.04 and Debian 13 packages
-
-Build the x86-64 `.deb` for your distribution or get it from a completed **Build installers** run. Run `sudo apt install ./FILE.deb` with its filename, then launch **Simple Modern Equalizer** from the application menu.
-
 ### Fedora 44 RPM
 
-Run `sudo dnf install ./FILE.rpm` with the RPM filename, then launch `simple-modern-equalizer`.
+Run `sudo dnf install ./FILE.rpm` with the downloaded filename, then open **Simple Modern Equalizer** from the application menu.
 
-### Windows x64 installer
+### Ubuntu 24.04 and Debian 13 packages
 
-Run `SimpleModernEqualizer-Setup-x64.msi` and open the app from Start. Uninstall Resonance first. The development MSI registers an unsigned audio component, sets `DisableProtectedAudioDG`, and restarts Windows Audio.
+Run `sudo apt install ./FILE.deb` with the downloaded filename, then open **Simple Modern Equalizer** from the application menu.
+
+## Try a headphone preset
+
+1. Play a familiar track. Under **Settings → Playback → Output device**, choose the output your headphones use or keep **Follow system default**.
+2. Open **Select Preset** and choose a tuning for your headphones. Choose **Flat** to start with a neutral curve.
+3. Adjust **Bass** or **Treble** in **Simple**. In **Standard**, drag a point up or down to change its gain or sideways to change its frequency.
+4. Use the equalizer’s **On / Off** switch while the track is playing to hear the difference.
+
+| Simple tone controls | Standard EQ with before / after monitoring |
+| --- | --- |
+| [![Bass, midrange, and treble controls with a live oscilloscope](docs/screenshots/simple.png)](docs/screenshots/simple.png) | [![Editable parametric EQ points and a live before / after spectrum](docs/screenshots/standard.png)](docs/screenshots/standard.png) |
+
+## Windows x64 installer
+
+Sign in to GitHub to [download the v0.1.16 MSI][windows-download]. Uninstall Resonance first, then run `SimpleModernEqualizer-Setup-x64.msi` and open the app from Start. The development MSI registers an unsigned audio component, sets `DisableProtectedAudioDG`, and restarts Windows Audio.
 
 ## Equalizer features
 
@@ -57,7 +73,7 @@ Run `SimpleModernEqualizer-Setup-x64.msi` and open the app from Start. Uninstall
 - **Frequency scale.** In **Settings → View → EQ frequency scale**, choose **Logarithmic** for equal spacing per octave or **Linear** for equal spacing per Hz on the Standard EQ graph.
 - **EQ phase mode.** In **Settings → Playback**, choose **Minimum Phase** (default), **Matched Phase**, **Linear Phase** (up to 176 ms of EQ buffering), or **Zero Phase (Beta)** (up to 250 ms). Matched Phase keeps the biquads and adds a short correction to approximate the analog magnitude and phase of the parametric bands. It adds about 11 ms at 48 kHz and retains the minimum-phase spline response. Linear and Zero Phase use a symmetric FIR for the full curve. Zero Phase uses a longer filter to follow narrow bands more closely. Very narrow bass bands are approximated at these fixed buffer lengths. The setting applies across presets.
 - **Headphone presets and Equalizer APO import.** Start with Flat, DT 770 PRO (32, 80, or 250 ohms), or one of eight DT 990 presets covering PRO, PRO Black Edition, Edition, and PRO X. **Select Preset** links presets to an audio output, saves custom tunings, and imports Equalizer APO `.txt` files. Loading or importing asks before replacing unsaved EQ changes. The **Delete** button asks for confirmation before deleting a saved preset or hiding a built-in one. [Headphone preset catalog](presets/catalog.json)
-- **Live audio monitoring.** **Live Monitor** offers seven views, including Before / After EQ on PipeWire. **True Peak** shows estimated intersample peaks for the front left and right output in dBTP, with a resettable maximum. Use **Settings** to choose an output or enable **Start on login** on Linux. [Audio output settings screenshot](docs/screenshots/settings.png)
+- **Live audio monitoring.** **Live Monitor** offers seven views, including Before / After EQ on PipeWire. **True Peak** shows estimated intersample peaks for the front left and right output in dBTP, with a resettable maximum. Use **Settings** to choose an output. Native Linux installations also offer **Start on login**. [Audio output settings screenshot](docs/screenshots/settings.png)
 - **Now Playing.** Shows the current song and artist from the system media session.
 
 ## Build from source
@@ -73,9 +89,14 @@ sh scripts/build-linux.sh
 | Package | Build command |
 | --- | --- |
 | [Linux AppImage](scripts/build-appimage.sh) | `sh scripts/build-appimage.sh` |
+| [Linux Flatpak](scripts/build-flatpak.sh) | `sh scripts/build-flatpak.sh` with Flatpak and Flatpak Builder installed |
 | [Ubuntu or Debian package](scripts/build-deb.sh) | `sh scripts/build-deb.sh` on the target distribution |
 | [Fedora RPM](scripts/build-fedora.sh) | `sh scripts/build-fedora.sh` |
 | [Windows MSI](scripts/build-windows.ps1) | `./scripts/build-windows.ps1` |
+
+Local installer builds are in `dist/`. The [v0.1.16 source archive][source-download] is also available as a GitHub Actions download.
+
+To publish a release, tag a commit on `main` with a new version such as `v0.1.17` and push the tag. The workflow publishes the packages to [GitHub Releases][releases] once all builds pass. Manual runs produce workflow artifacts for testing.
 
 Windows builds need MSVC, a Windows SDK, and WiX 4 with its Util extension. Enable EQ and pause playback before running the Windows audio check. [Audio check script](scripts/test-windows-audio.ps1)
 
@@ -84,3 +105,12 @@ To contribute a headphone preset, add your tuning with the model, impedance, and
 ## License
 
 Source is GPL-3.0-or-later. Builds using Slint’s GPL option are distributed under GPLv3. [License](LICENSE) · [Third-party notices](THIRD_PARTY_NOTICES.md)
+
+[appimage-download]: https://github.com/m757-0815/Simple-Modern-Equalizer/actions/runs/45635934436/artifacts/15034031057
+[fedora-download]: https://github.com/m757-0815/Simple-Modern-Equalizer/actions/runs/45635934436/artifacts/15034451215
+[ubuntu-download]: https://github.com/m757-0815/Simple-Modern-Equalizer/actions/runs/45635934436/artifacts/15033398006
+[debian-download]: https://github.com/m757-0815/Simple-Modern-Equalizer/actions/runs/45635934436/artifacts/15032949515
+[windows-download]: https://github.com/m757-0815/Simple-Modern-Equalizer/actions/runs/45635934436/artifacts/15033243574
+[source-download]: https://github.com/m757-0815/Simple-Modern-Equalizer/actions/runs/45635934436/artifacts/15033360114
+[installer-builds]: https://github.com/m757-0815/Simple-Modern-Equalizer/actions/workflows/package.yml
+[releases]: https://github.com/m757-0815/Simple-Modern-Equalizer/releases
