@@ -2,7 +2,7 @@
 
 Simple Modern Equalizer is a free, open-source system-wide EQ for headphones and speakers. On Linux it uses PipeWire to equalize audio from your apps. Load a headphone preset, adjust bass, midrange, and treble in **Simple**, or shape a parametric EQ or spline curve in **Standard**.
 
-[Linux downloads](#downloads) · [Try a headphone preset](#try-a-headphone-preset) · [Windows installer](#windows-x64-installer) · [Build from source](#build-from-source)
+**[Download the latest release][latest-release]** · [Try a headphone preset](#try-a-headphone-preset) · [Windows installer](#windows-x64-installer) · [Build from source](#build-from-source)
 
 ## Install on Linux
 
