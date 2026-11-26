@@ -29,6 +29,9 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.1.17" date="2026-11-26">
+      <description><p>Added a Flatpak bundle and public installer downloads.</p></description>
+    </release>
     <release version="0.1.16" date="2026-11-24"/>
   </releases>
   <content_rating type="oars-1.1"/>

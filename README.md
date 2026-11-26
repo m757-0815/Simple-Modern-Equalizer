@@ -8,20 +8,21 @@ Simple Modern Equalizer is a free, open-source system-wide EQ for headphones and
 
 ### Downloads
 
-Published versions appear on [GitHub Releases][releases] with public downloads. You can also sign in to GitHub to download the v0.1.16 build for your system below.
+Download a package for your system from the [latest GitHub release][latest-release].
 
 | Linux x86-64 | Download |
 | --- | --- |
 | AppImage | [Download AppImage][appimage-download] |
-| Fedora 44 | [Download RPM][fedora-download] |
-| Ubuntu 24.04 | [Download Ubuntu DEB][ubuntu-download] |
-| Debian 13 | [Download Debian DEB][debian-download] |
+| Flatpak | [Download Flatpak][flatpak-download] |
+| Fedora 44 | Choose the `.fc44.x86_64.rpm` |
+| Ubuntu 24.04 | Choose the `+ubuntu24.04_amd64.deb` |
+| Debian 13 | Choose the `+debian13_amd64.deb` |
 
-For Flatpak, see [Install the Flatpak bundle](#flatpak). For newer builds, check the [installer workflow runs][installer-builds] or [build from source](#build-from-source).
+For test builds, check the [installer workflow runs][installer-builds] or [build from source](#build-from-source).
 
 ### Flatpak
 
-Get `Simple-Modern-Equalizer-x86_64.flatpak` from a [GitHub release][releases] that includes the bundle, or [build it locally](#build-from-source). From the folder containing the bundle, run these commands.
+From the folder containing the Flatpak bundle, run these commands.
 
 ```sh
 flatpak install --user ./Simple-Modern-Equalizer-x86_64.flatpak
@@ -62,7 +63,7 @@ Run `sudo apt install ./FILE.deb` with the downloaded filename, then open **Simp
 
 ## Windows x64 installer
 
-Sign in to GitHub to [download the v0.1.16 MSI][windows-download]. Uninstall Resonance first, then run `SimpleModernEqualizer-Setup-x64.msi` and open the app from Start. The development MSI registers an unsigned audio component, sets `DisableProtectedAudioDG`, and restarts Windows Audio.
+[Download the Windows MSI][windows-download]. Uninstall Resonance first, then run `SimpleModernEqualizer-Setup-x64.msi` and open the app from Start. The development MSI registers an unsigned audio component, sets `DisableProtectedAudioDG`, and restarts Windows Audio.
 
 ## Equalizer features
 
@@ -90,9 +91,9 @@ sh scripts/build-linux.sh
 | [Fedora RPM](scripts/build-fedora.sh) | `sh scripts/build-fedora.sh` |
 | [Windows MSI](scripts/build-windows.ps1) | `./scripts/build-windows.ps1` |
 
-Local installer builds are in `dist/`. The [v0.1.16 source archive][source-download] is also available as a GitHub Actions download.
+Local installer builds are in `dist/`. The [source archive][source-download] is available from the latest release.
 
-To publish a release, tag a commit on `main` with a new version such as `v0.1.17` and push the tag. The workflow publishes the packages to [GitHub Releases][releases] once all builds pass. Manual runs produce workflow artifacts for testing.
+To publish a release, tag a commit on `main` with its version, prefixed by `v`, and push the tag. The workflow publishes the packages to [GitHub Releases][releases] once all builds pass. Manual runs produce workflow artifacts for testing.
 
 Windows builds need MSVC, a Windows SDK, and WiX 4 with its Util extension. Enable EQ and pause playback before running the Windows audio check. [Audio check script](scripts/test-windows-audio.ps1)
 
@@ -102,11 +103,10 @@ To contribute a headphone preset, add your tuning with the model, impedance, and
 
 Source is GPL-3.0-or-later. Builds using Slint’s GPL option are distributed under GPLv3. [License](LICENSE) · [Third-party notices](THIRD_PARTY_NOTICES.md)
 
-[appimage-download]: https://github.com/m757-0815/Simple-Modern-Equalizer/actions/runs/45635934436/artifacts/15034031057
-[fedora-download]: https://github.com/m757-0815/Simple-Modern-Equalizer/actions/runs/45635934436/artifacts/15034451215
-[ubuntu-download]: https://github.com/m757-0815/Simple-Modern-Equalizer/actions/runs/45635934436/artifacts/15033398006
-[debian-download]: https://github.com/m757-0815/Simple-Modern-Equalizer/actions/runs/45635934436/artifacts/15032949515
-[windows-download]: https://github.com/m757-0815/Simple-Modern-Equalizer/actions/runs/45635934436/artifacts/15033243574
-[source-download]: https://github.com/m757-0815/Simple-Modern-Equalizer/actions/runs/45635934436/artifacts/15033360114
+[appimage-download]: https://github.com/m757-0815/Simple-Modern-Equalizer/releases/latest/download/Simple-Modern-Equalizer-x86_64.AppImage
+[flatpak-download]: https://github.com/m757-0815/Simple-Modern-Equalizer/releases/latest/download/Simple-Modern-Equalizer-x86_64.flatpak
+[windows-download]: https://github.com/m757-0815/Simple-Modern-Equalizer/releases/latest/download/SimpleModernEqualizer-Setup-x64.msi
+[source-download]: https://github.com/m757-0815/Simple-Modern-Equalizer/releases/latest/download/Simple-Modern-Equalizer-source.tar.gz
 [installer-builds]: https://github.com/m757-0815/Simple-Modern-Equalizer/actions/workflows/package.yml
+[latest-release]: https://github.com/m757-0815/Simple-Modern-Equalizer/releases/latest
 [releases]: https://github.com/m757-0815/Simple-Modern-Equalizer/releases
