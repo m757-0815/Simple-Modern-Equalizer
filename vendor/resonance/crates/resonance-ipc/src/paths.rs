@@ -226,9 +226,8 @@ pub fn runtime_dir() -> PathBuf {
     }
 }
 
-/// Windows-only: the port file the daemon writes its loopback TCP port into.
-/// Clients read it to discover where to connect. Honours `$RESONANCE_SOCKET`
-/// (treated as a full path) for parity with the Unix socket override.
+/// Windows-only: the path of the user-encrypted daemon endpoint record.
+/// Honors `$RESONANCE_SOCKET` as a full path, like the Unix socket override.
 #[cfg(windows)]
 #[must_use]
 pub fn port_file_path() -> PathBuf {
@@ -238,15 +237,6 @@ pub fn port_file_path() -> PathBuf {
         }
     }
     runtime_dir().join("resonance.port")
-}
-
-/// Windows-only: read the daemon's loopback TCP port from the port file.
-#[cfg(windows)]
-#[must_use]
-pub fn read_port_file() -> Option<u16> {
-    std::fs::read_to_string(port_file_path())
-        .ok()
-        .and_then(|s| s.trim().parse::<u16>().ok())
 }
 
 /// Resolve the IPC Unix-socket path: respects `$RESONANCE_SOCKET` (any path),

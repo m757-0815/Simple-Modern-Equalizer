@@ -4,7 +4,7 @@
   <!-- declare the MSI package and upgrade behavior -->
   <!-- ####################################################### -->
 
-  <Package Name="Simple Modern Equalizer" Manufacturer="Simple Modern Equalizer" Version="$(var.ProductVersion)"
+  <Package Name="Simple Modern Equalizer (Experimental)" Manufacturer="Simple Modern Equalizer" Version="$(var.ProductVersion)"
            UpgradeCode="{91D7BBBF-7046-44C3-8D01-2F8B1153D68E}" Scope="perMachine">
     <MediaTemplate EmbedCab="yes" />
     <MajorUpgrade Schedule="afterInstallInitialize" DowngradeErrorMessage="A newer version is already installed." />

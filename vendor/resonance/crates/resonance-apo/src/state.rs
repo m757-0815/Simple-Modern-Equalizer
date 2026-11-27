@@ -46,7 +46,8 @@ pub const STATE_MAGIC: u32 = 0x4F50_4152;
 /// v11: − Loudness effect removed (buggy, redundant with Dynamic Boost).
 /// v12: + daemon liveness heartbeat (APO auto-bypass when stale).
 /// v14: headphone room, output limiter, and gain-reduction telemetry.
-pub const STATE_VERSION: u32 = 14;
+/// v15: stereo width and virtual speaker blend.
+pub const STATE_VERSION: u32 = 15;
 
 /// `solo_band` sentinel meaning "no band soloed" (the field is a fixed `u32`, so
 /// `Option` is encoded as this reserved value rather than a niche).
@@ -114,6 +115,8 @@ pub struct ChainSnapshot {
     pub bass: EffectSnapshot,
     pub crossfeed: EffectSnapshot,
     pub room_amount: f64,
+    pub stereo_width: f64,
+    pub virtual_speakers: f64,
     pub limiter_enabled: u32,
     pub num_filters: u32,
     /// Output dither target bit depth (`0` = off; else 16/20/24).
@@ -157,6 +160,8 @@ impl Default for ChainSnapshot {
             bass: EffectSnapshot::default(),
             crossfeed: EffectSnapshot::default(),
             room_amount: 0.0,
+            stereo_width: 1.0,
+            virtual_speakers: 0.0,
             limiter_enabled: 0,
             num_filters: 0,
             dither_bits: 0,
@@ -323,6 +328,7 @@ impl ChainSnapshot {
             };
         }
         let (route_channels, route_gains) = route_snapshot(chain);
+        let (stereo_width, virtual_speakers) = chain.spatial.settings();
         Self {
             enabled: u32::from(chain.enabled),
             preamp_db: chain.preamp_db,
@@ -333,6 +339,8 @@ impl ChainSnapshot {
             bass: effect(chain, FxEffect::Bass),
             crossfeed: effect(chain, FxEffect::Crossfeed),
             room_amount: chain.room.amount(),
+            stereo_width,
+            virtual_speakers,
             limiter_enabled: u32::from(chain.limiter.enabled()),
             num_filters: n as u32,
             dither_bits: chain.dither.bits().unwrap_or(0),
@@ -421,6 +429,7 @@ impl ChainSnapshot {
         chain.set_effect_intensity(FxEffect::Crossfeed, self.crossfeed.intensity);
         chain.set_effect_enabled(FxEffect::Crossfeed, self.crossfeed.enabled != 0);
         chain.room.set_amount(self.room_amount);
+        chain.spatial.set(self.stereo_width, self.virtual_speakers);
         chain.limiter.set_enabled(self.limiter_enabled != 0);
         chain.set_dither((self.dither_bits != 0).then_some(self.dither_bits));
         // Transient audition: solo forces the IIR path in the chain, so it works
@@ -486,6 +495,7 @@ impl ChainSnapshot {
         chain.set_effect_intensity(FxEffect::Crossfeed, self.crossfeed.intensity);
         chain.set_effect_enabled(FxEffect::Crossfeed, self.crossfeed.enabled != 0);
         chain.room.set_amount(self.room_amount);
+        chain.spatial.set(self.stereo_width, self.virtual_speakers);
         chain.limiter.set_enabled(self.limiter_enabled != 0);
         chain.set_dither((self.dither_bits != 0).then_some(self.dither_bits));
         // Transient solo applies in place (a cheap flag; no filter-state reset,
@@ -1227,6 +1237,7 @@ mod tests {
             .build();
         chain.set_effect_intensity(FxEffect::Bass, 0.7);
         chain.set_effect_enabled(FxEffect::Bass, true);
+        chain.spatial.set(1.15, 0.6);
 
         let path = temp_path("rt");
         let mut w = ApoStateWriter::create(&path).unwrap();
@@ -1248,6 +1259,10 @@ mod tests {
         let rebuilt = snap.build_chain(2, 48000.0);
         assert_eq!(rebuilt.filters.len(), 1);
         assert!((rebuilt.preamp_db + 3.5).abs() < 1e-9);
+        assert_eq!(rebuilt.spatial.settings(), (1.15, 0.6));
+        chain.spatial.set(1.0, 0.0);
+        assert!(snap.apply_to(&mut chain, 48000.0));
+        assert_eq!(chain.spatial.settings(), (1.15, 0.6));
 
         std::fs::remove_file(&path).ok();
     }

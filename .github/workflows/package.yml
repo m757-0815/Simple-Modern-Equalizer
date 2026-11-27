@@ -17,10 +17,31 @@ permissions:
 #######################################################
 
 jobs:
+  #######################################################
+  # require release tags to point to commits on main
+  #######################################################
+
+  release-source:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: github.event_name == 'push'
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify the tagged commit is on main
+        if: github.event_name == 'push'
+        run: |
+          if ! git merge-base --is-ancestor HEAD refs/remotes/origin/main; then
+            printf '%s\n' 'Release tags must point to a commit on main.' >&2
+            exit 1
+          fi
+
   windows:
+    needs: release-source
     runs-on: windows-2022
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Install pinned Rust toolchain and WiX
         shell: pwsh
         run: |
@@ -30,14 +51,14 @@ jobs:
       - name: Build Windows installer
         shell: pwsh
         run: ./scripts/build-windows.ps1
-      - name: Upload Windows MSI
-        uses: actions/upload-artifact@v7
+      - name: Upload experimental Windows MSI
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          path: dist/SimpleModernEqualizer-Setup-x64.msi
+          path: dist/SimpleModernEqualizer-Experimental-Setup-x64.msi
           archive: false
           if-no-files-found: error
       - name: Upload Windows executable
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           path: dist/windows/simple-modern-equalizer.exe
           archive: false
@@ -48,9 +69,10 @@ jobs:
   #######################################################
 
   appimage:
+    needs: release-source
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Install build dependencies
         run: |
           rustup show
@@ -59,7 +81,7 @@ jobs:
       - name: Build AppImage
         run: sh scripts/build-appimage.sh
       - name: Upload Linux AppImage
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           path: dist/Simple-Modern-Equalizer-x86_64.AppImage
           archive: false
@@ -70,6 +92,7 @@ jobs:
   #######################################################
 
   fedora:
+    needs: release-source
     runs-on: ubuntu-24.04
     container: fedora:44
     steps:
@@ -78,7 +101,7 @@ jobs:
           dnf install -y git gcc gcc-c++ pkgconf-pkg-config pipewire-devel clang-devel systemd-devel libxkbcommon-devel fontconfig-devel mesa-libGL-devel rpm-build desktop-file-utils python3 curl
           curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Build and check Fedora RPM
         run: |
           rustup show
@@ -88,7 +111,7 @@ jobs:
           test -x /usr/bin/simple-modern-equalizer
           test -x /usr/libexec/simple-modern-equalizer/resonanced
       - name: Upload Fedora RPM
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           path: dist/*.rpm
           archive: false
@@ -99,6 +122,7 @@ jobs:
   #######################################################
 
   deb:
+    needs: release-source
     name: Build .deb for ${{ matrix.platform }}
     runs-on: ubuntu-24.04
     strategy:
@@ -122,7 +146,7 @@ jobs:
             libudev-dev libxkbcommon-dev pkg-config python3
           curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Build and check Debian package
         run: |
           rustup show
@@ -133,7 +157,7 @@ jobs:
           test -x /usr/lib/simple-modern-equalizer/resonanced
           test -s /usr/share/icons/hicolor/256x256/apps/simple-modern-equalizer.png
       - name: Upload distribution package
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           path: dist/*.deb
           archive: false
@@ -144,9 +168,10 @@ jobs:
   #######################################################
 
   flatpak:
+    needs: release-source
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Install build dependencies
         run: |
           sudo apt-get update
@@ -154,7 +179,7 @@ jobs:
       - name: Build Flatpak
         run: sh scripts/build-flatpak.sh
       - name: Upload Linux Flatpak
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           path: dist/Simple-Modern-Equalizer-x86_64.flatpak
           archive: false
@@ -165,12 +190,13 @@ jobs:
   #######################################################
 
   source:
+    needs: release-source
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - run: git archive --prefix=Simple-Modern-Equalizer/ -o Simple-Modern-Equalizer-source.tar.gz HEAD
       - name: Upload source archive
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           path: Simple-Modern-Equalizer-source.tar.gz
           archive: false
@@ -191,7 +217,7 @@ jobs:
       group: publish-release-${{ github.ref }}
     steps:
       - name: Download the built packages
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           path: release-assets
           merge-multiple: true
@@ -209,7 +235,7 @@ jobs:
             release-assets/simple-modern-equalizer-*.fc44.x86_64.rpm
             release-assets/simple-modern-equalizer_*+ubuntu24.04_amd64.deb
             release-assets/simple-modern-equalizer_*+debian13_amd64.deb
-            release-assets/SimpleModernEqualizer-Setup-x64.msi
+            release-assets/SimpleModernEqualizer-Experimental-Setup-x64.msi
             release-assets/Simple-Modern-Equalizer-source.tar.gz
           )
           if (( ${#assets[@]} != 7 )); then

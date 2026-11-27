@@ -2,7 +2,7 @@
 
 Simple Modern Equalizer is a free, open-source system-wide EQ for headphones and speakers. On Linux it uses PipeWire to equalize audio from your apps. Load a headphone preset, adjust bass, midrange, and treble in **Simple**, or shape a parametric EQ or spline curve in **Standard**.
 
-[Linux downloads](#downloads) · [Try a headphone preset](#try-a-headphone-preset) · [Windows installer](#windows-x64-installer) · [Build from source](#build-from-source)
+[Linux downloads](#downloads) · [Try a headphone preset](#try-a-headphone-preset) · [Experimental Windows installer](#experimental-windows-x64-installer) · [Build from source](#build-from-source)
 
 ## Install on Linux
 
@@ -60,17 +60,18 @@ Run `sudo apt install ./FILE.deb` with the downloaded filename, then open **Simp
 | --- | --- |
 | [![Bass, midrange, and treble controls with a live oscilloscope](docs/screenshots/simple.png)](docs/screenshots/simple.png) | [![Editable parametric EQ points and a live before / after spectrum](docs/screenshots/standard.png)](docs/screenshots/standard.png) |
 
-## Windows x64 installer
+## Experimental Windows x64 installer
 
-Sign in to GitHub to [download the v0.1.16 MSI][windows-download]. Uninstall Resonance first, then run `SimpleModernEqualizer-Setup-x64.msi` and open the app from Start. The development MSI registers an unsigned audio component, sets `DisableProtectedAudioDG`, and restarts Windows Audio.
+Sign in to GitHub to [download the v0.1.16 MSI][windows-download]. Uninstall Resonance first, then run `SimpleModernEqualizer-Setup-x64.msi` and open the app from Start. The experimental MSI registers an unsigned audio component, sets `DisableProtectedAudioDG` system-wide, and restarts Windows Audio. The uninstaller restores the previous registry value. New installer builds include `Experimental` in the filename.
 
 ## Equalizer features
 
 - **Tone controls.** The **Simple** view gives you Bass, Mid, Treble, and Loudness. Double-click a lever to reset it. Both modes share **Preamp & Balance**. Enabling **Auto Headroom** replaces the manual preamp gain with a calculated value.
 - **Headphone crossfeed.** Enable **Settings → View → Advanced** to show the panel below **Preamp & Balance**. Move the slider from **0%** (off) to **100%** to adjust how much of each stereo channel reaches the opposite ear. The app saves the level for each output.
 - **Room Amount and Output Limiter.** Room Amount ranges from subtle reflections to a pronounced small-room mix. It defaults to **0%** for each output. The optional limiter targets **−1 dBTP** after EQ and effects and displays the gain reduction in dB. Enable **Show on EQ** beside the limiter to highlight strong frequencies during gain reduction on the Standard EQ graph.
+- **Stereo Width and Virtual Speakers.** On stereo outputs, narrow the image down to mono at **0%**, keep its original width at **100%**, or widen it up to **125%**. For headphones, blend in a virtual front speaker pair using measured ear responses. Virtual Speakers defaults to **0%** and adds a few milliseconds of processing delay when active. Both settings are saved per output.
 - **Parametric EQ and spline editing.** In **Standard**, drag EQ handles, hold **Shift** for fine adjustment, and double-click to add a handle. Set the graph range in the upper right from **±1 dB** to **±24 dB**. At ±1 dB, moving through half the graph height adjusts gain by 1 dB. Right-click a band or interior spline point to remove it. **Use Spline** and **Use Parametric** fit the same reference curve. **Optimizing EQ curve…** appears while a fit runs. **Undo** keeps the last 15 EQ actions.
-- **Frequency scale.** In **Settings → View → EQ frequency scale**, choose **Logarithmic** for equal spacing per octave or **Linear** for equal spacing per Hz on the Standard EQ graph.
+- **Frequency scale.** The EQ graph uses a logarithmic frequency axis with equal spacing per octave.
 - **EQ phase mode.** In **Settings → Playback**, choose **Minimum Phase** (default), **Matched Phase**, **Linear Phase** (up to 176 ms of EQ buffering), or **Zero Phase (Beta)** (up to 250 ms). Matched Phase keeps the biquads and adds a short correction to approximate the analog magnitude and phase of the parametric bands. It adds about 11 ms at 48 kHz and retains the minimum-phase spline response. Linear and Zero Phase use a symmetric FIR for the full curve. Zero Phase uses a longer filter to follow narrow bands more closely. Very narrow bass bands are approximated at these fixed buffer lengths. The setting applies across presets.
 - **Headphone presets and Equalizer APO import.** Start with Flat, DT 770 PRO (32, 80, or 250 ohms), or one of eight DT 990 presets covering PRO, PRO Black Edition, Edition, and PRO X. **Select Preset** links presets to an audio output, saves custom tunings, and imports Equalizer APO `.txt` files. Loading or importing asks before replacing unsaved EQ changes. The **Delete** button asks for confirmation before deleting a saved preset or hiding a built-in one. [Headphone preset catalog](presets/catalog.json)
 - **Live audio monitoring.** **Live Monitor** offers seven views, including Before / After EQ on PipeWire. **True Peak** shows estimated intersample peaks for the front left and right output in dBTP, with a resettable maximum. Use **Settings** to choose an output. Native Linux installations also offer **Start on login**. [Audio output settings screenshot](docs/screenshots/settings.png)
@@ -92,7 +93,7 @@ sh scripts/build-linux.sh
 | [Linux Flatpak](scripts/build-flatpak.sh) | `sh scripts/build-flatpak.sh` with Flatpak and Flatpak Builder installed |
 | [Ubuntu or Debian package](scripts/build-deb.sh) | `sh scripts/build-deb.sh` on the target distribution |
 | [Fedora RPM](scripts/build-fedora.sh) | `sh scripts/build-fedora.sh` |
-| [Windows MSI](scripts/build-windows.ps1) | `./scripts/build-windows.ps1` |
+| [Experimental Windows MSI](scripts/build-windows.ps1) | `./scripts/build-windows.ps1` |
 
 Local installer builds are in `dist/`. The [v0.1.16 source archive][source-download] is also available as a GitHub Actions download.
 

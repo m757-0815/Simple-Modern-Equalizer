@@ -1,5 +1,5 @@
 use crate::{config::Config, phase, presets::Crossfeed};
-use resonance_ipc::{Command, DaemonState, EffectsState, FxEffectId, OutputEffects, Response, RoutingMatrix, transport::SyncClient};
+use resonance_ipc::{Command, DaemonState, EffectsState, FxEffectId, OutputEffects, Response, RoutingMatrix, SpatialEffects, transport::SyncClient};
 use std::{path::{Path, PathBuf}, process::{Child, Command as Process}, sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}}, thread, time::{Duration, Instant}};
 
 // #######################################################
@@ -55,6 +55,7 @@ pub struct LimiterHit {
 pub struct PlaybackEffects {
     pub crossfeed: Crossfeed,
     pub output: OutputEffects,
+    pub spatial: SpatialEffects,
 }
 
 #[derive(Default)]
@@ -186,9 +187,14 @@ fn playback_plan(
     if let Some(command) = commands.first_mut()
         && let Command::ApplyState { preamp_db, enabled, bands, .. } = command
     {
-        *command = Command::ApplyStateWithOutputEffects {
-            preamp_db: *preamp_db, enabled: *enabled, bands: std::mem::take(bands),
-            effects: desired.effects(), output_effects: desired.playback_effects.output,
+        let spatial_effects = desired.playback_effects.spatial;
+        let (preamp_db, enabled, bands) = (*preamp_db, *enabled, std::mem::take(bands));
+        let effects = desired.effects();
+        let output_effects = desired.playback_effects.output;
+        *command = if spatial_effects == SpatialEffects::default() {
+            Command::ApplyStateWithOutputEffects { preamp_db, enabled, bands, effects, output_effects }
+        } else {
+            Command::ApplyStateWithSpatialEffects { preamp_db, enabled, bands, effects, output_effects, spatial_effects }
         };
     } else if let Some(old) = previous {
         let before = old.playback_effects;
@@ -204,6 +210,9 @@ fn playback_plan(
         if before.output != after.output {
             commands.push(Command::SetOutputEffects(after.output));
         }
+        if before.spatial != after.spatial {
+            commands.push(Command::SetSpatialEffects(after.spatial));
+        }
     }
     if let Some(convolution) = convolution {
         let mut deferred = Vec::new();
@@ -211,7 +220,8 @@ fn playback_plan(
         // convolution is in place, and raise preamp only after the IR change.
         commands.retain_mut(|command| {
             match command {
-                Command::ApplyStateWithOutputEffects { enabled, .. } if *enabled => {
+                Command::ApplyStateWithOutputEffects { enabled, .. }
+                | Command::ApplyStateWithSpatialEffects { enabled, .. } if *enabled => {
                     *enabled = false;
                     deferred.push(Command::SetPower { enabled: true });
                 }
@@ -249,14 +259,15 @@ fn apply_playback(
         .collect();
     let routing = (format.channels > 1 && cfg.gains() != (1.0, 1.0))
         .then(|| balance_matrix(format.channels, &cfg));
-    Ok(Command::ApplyAdvancedPlayback {
-        preamp_db: cfg.preamp_db,
-        enabled: !cfg.bypass,
-        bands,
-        routing,
-        convolution,
-        effects: settings.effects(),
-        output_effects: settings.playback_effects.output,
+    let preamp_db = cfg.preamp_db;
+    let enabled = !cfg.bypass;
+    let effects = settings.effects();
+    let output_effects = settings.playback_effects.output;
+    let spatial_effects = settings.playback_effects.spatial;
+    Ok(if spatial_effects == SpatialEffects::default() {
+        Command::ApplyAdvancedPlayback { preamp_db, enabled, bands, routing, convolution, effects, output_effects }
+    } else {
+        Command::ApplySpatialPlayback { preamp_db, enabled, bands, routing, convolution, effects, output_effects, spatial_effects }
     })
 }
 
@@ -804,24 +815,26 @@ mod tests {
         let format = AudioFormat { channels: 2, sample_rate: 48_000.0, output: Some("Headphones".into()) };
         let off = PlaybackSettings::default();
         let output = OutputEffects { room_amount: 0.44, limiter_enabled: true };
+        let spatial = SpatialEffects { width: 1.2, virtual_speakers: 0.55 };
         let high = PlaybackSettings {
-            playback_effects: PlaybackEffects { crossfeed: Crossfeed::new(100), output },
+            playback_effects: PlaybackEffects { crossfeed: Crossfeed::new(100), output, spatial },
             ..PlaybackSettings::default()
         };
         let load = apply_playback(&high, &format, Some("spline.wav".into())).unwrap();
-        assert!(matches!(load, Command::ApplyAdvancedPlayback { effects, output_effects, convolution: Some(_), .. }
-            if output_effects == output && effects.get(FxEffectId::Crossfeed) == (1.0, true)));
+        assert!(matches!(load, Command::ApplySpatialPlayback { effects, output_effects, spatial_effects, convolution: Some(_), .. }
+            if output_effects == output && spatial_effects == spatial && effects.get(FxEffectId::Crossfeed) == (1.0, true)));
         let full = playback_plan(None, &high, &format, None).unwrap();
-        assert!(matches!(&full[0], Command::ApplyStateWithOutputEffects { effects, output_effects, .. }
-            if *output_effects == output && effects.get(FxEffectId::Crossfeed) == (1.0, true)));
+        assert!(matches!(&full[0], Command::ApplyStateWithSpatialEffects { effects, output_effects, spatial_effects, .. }
+            if *output_effects == output && *spatial_effects == spatial && effects.get(FxEffectId::Crossfeed) == (1.0, true)));
         let live = playback_plan(Some(&off), &high, &format, None).unwrap();
         assert!(matches!(live.as_slice(), [
             Command::SetEffectIntensity { effect: FxEffectId::Crossfeed, value: 1.0 },
             Command::SetEffectEnabled { effect: FxEffectId::Crossfeed, enabled: true },
             Command::SetOutputEffects(installed),
-        ] if *installed == output));
+            Command::SetSpatialEffects(installed_spatial),
+        ] if *installed == output && *installed_spatial == spatial));
         let level = PlaybackSettings {
-            playback_effects: PlaybackEffects { crossfeed: Crossfeed::new(37), output },
+            playback_effects: PlaybackEffects { crossfeed: Crossfeed::new(37), output, spatial },
             ..PlaybackSettings::default()
         };
         let adjusted = playback_plan(Some(&high), &level, &format, None).unwrap();
@@ -843,8 +856,8 @@ mod tests {
     #[test]
     #[ignore = "run with SIMPLEDARKEQ_TEST_ENGINE pointing to a compiled Windows daemon"]
     fn windows_daemon_accepts_full_sync_and_incremental_edits() {
-        use resonance_ipc::transport::{read_response, write_command};
-        use std::{fs, net::TcpStream, path::Path, process::Stdio, time::SystemTime};
+        use resonance_ipc::transport::{read_response, windows_endpoint, write_command};
+        use std::{fs, io::{Read, Write}, net::TcpStream, process::Stdio, time::SystemTime};
 
         struct TestDaemon {
             child: Child,
@@ -887,18 +900,24 @@ mod tests {
             .stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null())
             .spawn().expect("start isolated daemon");
         let mut daemon = TestDaemon { child, directory };
-        fn connect(port_file: &Path) -> Option<TcpStream> {
-            let port = fs::read_to_string(port_file).ok()?.trim().parse::<u16>().ok()?;
-            TcpStream::connect_timeout(&([127, 0, 0, 1], port).into(), Duration::from_millis(200)).ok()
-        }
         let deadline = Instant::now() + Duration::from_secs(5);
         let mut stream = loop {
-            if let Some(stream) = connect(&port_file) { break stream; }
+            if let Ok(stream) = windows_endpoint::connect(&port_file) { break stream; }
             assert!(Instant::now() < deadline, "isolated daemon did not start");
             thread::sleep(Duration::from_millis(20));
         };
         stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
         stream.set_write_timeout(Some(Duration::from_secs(2))).unwrap();
+
+        // A loopback connection that cannot authenticate receives no command reply.
+        let mut unauthorized = TcpStream::connect(stream.peer_addr().unwrap()).unwrap();
+        unauthorized.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        unauthorized.write_all(&windows_endpoint::Token::default()).unwrap();
+        match unauthorized.read(&mut [0]) {
+            Ok(0) => (),
+            Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => (),
+            result => panic!("unauthenticated connection was not closed: {result:?}"),
+        }
 
         let Response::State(initial) = exchange(&mut stream, Command::GetState) else { panic!("missing initial state"); };
         assert!(matches!(exchange(&mut stream, Command::SetOutputTarget { node_name: "missing SimpleDarkEQ test device".into() }), Response::Error(_)));

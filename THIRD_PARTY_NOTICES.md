@@ -51,6 +51,19 @@ The interface uses Inter Light under the SIL Open Font License 1.1.
 Source: https://github.com/rsms/inter/releases/tag/v4.1
 The license is in `ui/fonts/OFL.txt` and ships with packaged builds.
 
+## MIT KEMAR measurements
+
+Virtual Speakers uses the diffuse-field equalized KEMAR measurements of Bill Gardner
+and Keith Martin, copyright 1994 MIT Media Laboratory. The MIT Media Lab permits
+unrestricted use of the data with attribution to the authors in research or
+commercial applications.
+
+Source: https://sound.media.mit.edu/resources/KEMAR.html
+
+`vendor/resonance/crates/resonance-dsp/src/kemar-30-deg.pcm` contains the unmodified
+44.1 kHz stereo PCM samples from `diffuse.zip`, `elev0/H0e030a.wav`. The renderer
+mirrors this response to place the two virtual speakers at ±30°.
+
 ## Bundled headphone presets
 
 The bundled filter settings and descriptions were created for Simple Modern

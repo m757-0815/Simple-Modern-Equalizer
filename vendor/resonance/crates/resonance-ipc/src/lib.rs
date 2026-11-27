@@ -381,6 +381,27 @@ pub enum Command {
         effects: EffectsState,
         output_effects: OutputEffects,
     },
+    /// Adjust the stereo output without replacing playback filters.
+    SetSpatialEffects(SpatialEffects),
+    /// Install spatial settings in the same transition as the PipeWire filters.
+    ApplySpatialPlayback {
+        preamp_db: f64,
+        enabled: bool,
+        bands: Vec<BandState>,
+        routing: Option<RoutingMatrix>,
+        convolution: Option<String>,
+        effects: EffectsState,
+        output_effects: OutputEffects,
+        spatial_effects: SpatialEffects,
+    },
+    ApplyStateWithSpatialEffects {
+        preamp_db: f64,
+        enabled: bool,
+        bands: Vec<BandState>,
+        effects: EffectsState,
+        output_effects: OutputEffects,
+        spatial_effects: SpatialEffects,
+    },
 }
 
 /// Per-band audition mode (mirrors `resonance_dsp::chain::AuditionMode`).
@@ -694,6 +715,18 @@ pub enum Response {
 pub struct OutputEffects {
     pub room_amount: f64,
     pub limiter_enabled: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct SpatialEffects {
+    pub width: f64,
+    pub virtual_speakers: f64,
+}
+
+impl Default for SpatialEffects {
+    fn default() -> Self {
+        Self { width: 1.0, virtual_speakers: 0.0 }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

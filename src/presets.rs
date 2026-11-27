@@ -121,6 +121,7 @@ pub struct Preferences {
     #[serde(rename = "headphone_crossfeed_percent", alias = "headphone_crossfeed")]
     pub headphone_crossfeed: BTreeMap<String, Crossfeed>,
     pub headphone_room_percent: BTreeMap<String, u8>,
+    pub output_spatial: BTreeMap<String, SpatialSettings>,
     pub limiter_enabled: bool,
     pub outputs: BTreeMap<String, String>,
     pub hidden_builtin_presets: BTreeSet<String>,
@@ -130,6 +131,28 @@ pub struct Preferences {
     pub eq_range_db: i32,
     pub display: DisplayPreferences,
     pub colors: crate::theme::ThemeColors,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default)]
+pub struct SpatialSettings {
+    pub width_percent: u8,
+    pub virtual_speakers_percent: u8,
+}
+
+impl Default for SpatialSettings {
+    fn default() -> Self {
+        Self { width_percent: 100, virtual_speakers_percent: 0 }
+    }
+}
+
+impl SpatialSettings {
+    pub fn bounded(self) -> Self {
+        Self {
+            width_percent: self.width_percent.min(125),
+            virtual_speakers_percent: self.virtual_speakers_percent.min(100),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -190,7 +213,6 @@ pub struct DisplayPreferences {
     pub limiter_overlay: bool,
     pub preset_button: bool,
     pub eq_spectrum: bool,
-    pub eq_frequency_scale: crate::graph::FrequencyScale,
 }
 
 impl DisplayPreferences {
@@ -207,7 +229,6 @@ impl Default for DisplayPreferences {
         Self {
             live_mode: 2, band_list: true, levels: true, advanced: false,
             clipping: true, limiter_overlay: false, preset_button: true, eq_spectrum: false,
-            eq_frequency_scale: crate::graph::FrequencyScale::default(),
         }
     }
 }
@@ -220,6 +241,7 @@ impl Default for Preferences {
             phase_mode: crate::phase::Mode::default(),
             headphone_crossfeed: BTreeMap::new(),
             headphone_room_percent: BTreeMap::new(),
+            output_spatial: BTreeMap::new(),
             limiter_enabled: false,
             outputs: BTreeMap::new(),
             hidden_builtin_presets: BTreeSet::new(),
@@ -269,16 +291,14 @@ mod tests {
     }
 
     #[test]
-    fn eq_frequency_scale_defaults_to_logarithmic_and_round_trips() {
-        use crate::graph::FrequencyScale;
-
-        let mut preferences: Preferences = serde_json::from_str(r#"{"display":{"live_mode":2}}"#).unwrap();
-        assert_eq!(preferences.display.eq_frequency_scale, FrequencyScale::Logarithmic);
-        preferences.display.eq_frequency_scale = FrequencyScale::Linear;
+    fn preferences_ignore_the_removed_scale_and_keep_other_display_options() {
+        let preferences: Preferences = serde_json::from_str(r#"{
+            "display": {"eq_frequency_scale": "linear", "live_mode": 3, "band_list": false}
+        }"#).unwrap();
+        assert_eq!(preferences.display.live_mode, 3);
+        assert!(!preferences.display.band_list);
         let saved = serde_json::to_value(&preferences).unwrap();
-        assert_eq!(saved["display"]["eq_frequency_scale"], "linear");
-        let loaded: Preferences = serde_json::from_value(saved).unwrap();
-        assert_eq!(loaded.display.eq_frequency_scale, FrequencyScale::Linear);
+        assert!(saved["display"].get("eq_frequency_scale").is_none());
     }
 
     #[test]

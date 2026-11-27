@@ -159,6 +159,9 @@ pub fn apply_command(chain: &mut ProcessorChain, cmd: AudioCommand) {
             chain.room.set_amount(effects.room_amount);
             chain.limiter.set_enabled(effects.limiter_enabled);
         }
+        AudioCommand::SetSpatialEffects(effects) => {
+            chain.spatial.set(effects.width, effects.virtual_speakers);
+        }
         AudioCommand::SetDither { bits } => chain.set_dither(bits),
         AudioCommand::ReplaceChain(c) => {
             // The incoming chain carries the shadow/preset construction rate

@@ -111,6 +111,7 @@ pub struct ProcessorChain {
     pub bass: BassBoostEffect,
     pub crossfeed: CrossfeedEffect,
     pub room: crate::output_effects::Room,
+    pub spatial: crate::output_effects::Spatial,
     pub limiter: crate::output_effects::Limiter,
     /// Final-stage TPDF dither (off by default → bit-exact).
     pub dither: DitherStage,
@@ -142,6 +143,7 @@ impl ProcessorChain {
         if self.enabled && !enabled {
             // Delay lines should never replay their old samples after bypass.
             self.room.reset();
+            self.spatial.reset();
             self.limiter.reset();
         }
         self.enabled = enabled;
@@ -377,6 +379,7 @@ impl ProcessorChain {
         // Shape the stereo image before adding the room reflections.
         self.crossfeed.process(buf, channels);
         self.room.process(buf, channels);
+        self.spatial.process(buf, channels);
         self.limiter.process(buf, channels);
         // Dither is the very last stage, right before the output truncation.
         self.dither.apply(buf, channels);
@@ -491,16 +494,20 @@ impl ProcessorChain {
         self.bass.reset();
         self.crossfeed.reset();
         self.room.reset();
+        self.spatial.reset();
         self.limiter.reset();
         self.dither.reset();
     }
 
     fn rebind_output_effects(&mut self, channels: usize, rate: f64) {
         let room = self.room.amount();
+        let (width, virtual_speakers) = self.spatial.settings();
         let limiter = self.limiter.enabled();
         self.room = crate::output_effects::Room::new(rate);
+        self.spatial = crate::output_effects::Spatial::new(channels, rate);
         self.limiter = crate::output_effects::Limiter::new(channels, rate);
         self.room.set_amount(room);
+        self.spatial.set(width, virtual_speakers);
         self.limiter.set_enabled(limiter);
     }
 
@@ -708,6 +715,7 @@ impl ProcessorChainBuilder {
             bass: BassBoostEffect::new(channels, sr),
             crossfeed: CrossfeedEffect::new(channels, sr),
             room: crate::output_effects::Room::new(sr),
+            spatial: crate::output_effects::Spatial::new(channels, sr),
             limiter: crate::output_effects::Limiter::new(channels, sr),
             dither: DitherStage::new(channels),
             routing: None,

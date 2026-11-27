@@ -51,29 +51,23 @@ fn playback_settings_offer_all_eq_phase_modes() {
 }
 
 #[test]
-fn view_settings_select_the_eq_frequency_scale() {
+fn eq_graph_keeps_logarithmic_labels_at_different_widths() {
     let ui = window();
     crate::update_eq_frequency_ticks(&ui);
-    let redraw = ui.as_weak();
-    ui.on_change_eq_frequency_scale(move || crate::update_eq_frequency_ticks(&redraw.unwrap()));
-    let saved = Rc::new(Cell::new(false));
-    let captured = saved.clone();
-    ui.on_save_graph_view(move || captured.set(true));
+    ui.set_show_live_view(false);
     ui.show().unwrap();
+
+    ui.window().set_size(LogicalSize::new(480.0, 920.0));
+    assert!(ElementHandle::find_by_accessible_label(&ui, "20 kHz").next().is_some());
+    assert!(ElementHandle::find_by_accessible_label(&ui, "10k").next().is_none());
+    ui.window().set_size(LogicalSize::new(1120.0, 920.0));
+    assert!(ElementHandle::find_by_accessible_label(&ui, "10k").next().is_some());
     open_settings(&ui);
 
-    let choice = element(&ui, "EQ frequency scale", AccessibleRole::Combobox);
-    assert_eq!(choice.accessible_value().unwrap(), "Logarithmic");
-    assert_eq!(ui.get_eq_frequency_ticks().row_data(2).unwrap().label, "1k");
-    choice.invoke_accessible_expand_action();
-    key(&ui, Key::DownArrow);
-    key(&ui, Key::Return);
-    assert!(saved.get());
-    assert_eq!(ui.get_eq_frequency_scale_index(), 1);
-    assert_eq!(choice.accessible_value().unwrap(), "Linear");
+    assert!(ElementHandle::find_by_accessible_label(&ui, "EQ frequency scale").next().is_none());
     let middle_tick = ui.get_eq_frequency_ticks().row_data(2).unwrap();
-    assert_eq!(middle_tick.label, "10k");
-    assert!((middle_tick.position - 0.5).abs() < 0.001);
+    assert_eq!(middle_tick.label, "1k");
+    assert!((middle_tick.position - 0.5663).abs() < 0.001);
 }
 
 #[test]
@@ -140,6 +134,25 @@ fn preset_menu_requests_equalizer_apo_import() {
     element(&ui, "Select Preset", AccessibleRole::Button).invoke_accessible_default_action();
     element(&ui, "Import Equalizer APO", AccessibleRole::Button).invoke_accessible_default_action();
     assert!(requested.get());
+}
+
+#[test]
+fn playback_and_filter_dropdowns_have_distinct_accessible_names() {
+    let ui = window();
+    ui.set_connected(true);
+    ui.set_show_live_view(false);
+    ui.set_outputs(crate::text_model(["Follow system default".into(), "Speakers".into()]));
+    ui.set_bands(Rc::new(VecModel::from(vec![BandRow::default(); 2])).into());
+    ui.show().unwrap();
+
+    for index in 1..=2 {
+        let filter = element(&ui, &format!("Band {index} filter type"), AccessibleRole::Combobox);
+        assert_eq!(filter.accessible_value().unwrap(), "Peak");
+    }
+
+    open_settings(&ui);
+    let output = element(&ui, "Output device", AccessibleRole::Combobox);
+    assert_eq!(output.accessible_value().unwrap(), "Follow system default");
 }
 
 #[test]
@@ -555,6 +568,11 @@ fn edited_band_removal_can_be_cancelled_or_confirmed() {
         element(&ui, button, AccessibleRole::Button).invoke_accessible_default_action();
         assert_eq!(decision.get(), Some(confirmed));
     }
+    decision.set(None);
+    ui.invoke_warn_single_band_removal(2);
+    key(&ui, Key::Escape);
+    assert_eq!(decision.get(), Some(false));
+    assert!(ElementHandle::find_by_accessible_label(&ui, "Remove").next().is_none());
 }
 
 #[test]
@@ -711,7 +729,7 @@ fn advanced_effects_are_below_the_preamp_in_both_layouts() {
     let ui = window();
     ui.set_connected(true);
     ui.set_crossfeed_available(true);
-    ui.set_room_available(true);
+    ui.set_stereo_effects_available(true);
     let changes = Rc::new(Cell::new(0));
     let changes_seen = changes.clone();
     ui.on_change_advanced_effects(move || changes_seen.set(changes_seen.get() + 1));
@@ -720,8 +738,12 @@ fn advanced_effects_are_below_the_preamp_in_both_layouts() {
     assert!(ElementHandle::find_by_element_id(&ui, "MainWindow::advanced-panel").next().is_none());
     ui.set_show_advanced(true);
 
-    for simple in [true, false] {
+    for (simple, width) in [
+        (true, 480.0), (true, 819.0), (true, 820.0), (true, 1120.0),
+        (false, 480.0), (false, 819.0), (false, 820.0), (false, 1120.0),
+    ] {
         ui.set_simple_layout(simple);
+        ui.window().set_size(LogicalSize::new(width, 920.0));
         ui.window().dispatch_event(WindowEvent::PointerScrolled {
             position: LogicalPosition::new(10.0, 560.0),
             delta_x: 0.0,
@@ -732,29 +754,81 @@ fn advanced_effects_are_below_the_preamp_in_both_layouts() {
         let advanced = ElementHandle::find_by_element_id(&ui, "MainWindow::advanced-panel").next().unwrap();
         assert!(advanced.absolute_position().y >= preamp.absolute_position().y + preamp.size().height);
         assert!(ElementHandle::find_by_accessible_label(&ui, "Advanced").next().is_some());
-        let crossfeed = element(&ui, "Headphone Crossfeed", AccessibleRole::Slider);
-        let room = element(&ui, "Room Amount", AccessibleRole::Slider);
+        let mut previous_y = advanced.absolute_position().y;
+        for (name, percent) in [("Headphone Crossfeed", "0"), ("Room Amount", "0"),
+            ("Stereo Width", "100"), ("Virtual Speakers", "0")]
+        {
+            let slider = element(&ui, name, AccessibleRole::Slider);
+            let amount = element(&ui, &format!("{name} percent"), AccessibleRole::Spinbox);
+            assert_eq!(slider.accessible_value().unwrap(), percent);
+            assert_eq!(amount.accessible_value().unwrap(), percent);
+            let slider_position = slider.absolute_position();
+            let amount_position = amount.absolute_position();
+            let right_inset = advanced.absolute_position().x + advanced.size().width
+                - amount_position.x - amount.size().width;
+            assert!(slider_position.y > previous_y);
+            assert!(amount_position.x >= slider_position.x + slider.size().width);
+            assert!((14.0..=34.0).contains(&right_inset), "{name} percentage inset at {width}px: {right_inset}");
+            assert!(slider.size().width >= 130.0, "{name} slider at {width}px should use the available width");
+            let slider_center = slider_position.y + slider.size().height / 2.0;
+            let amount_center = amount_position.y + amount.size().height / 2.0;
+            assert!((slider_center - amount_center).abs() <= 1.0);
+            previous_y = slider_position.y;
+        }
         let limiter = element(&ui, "Output Limiter", AccessibleRole::Checkbox);
-        assert_eq!(crossfeed.accessible_value().unwrap().parse::<f32>().unwrap(), 0.0);
-        assert_eq!(room.accessible_value().unwrap().parse::<f32>().unwrap(), 0.0);
         assert_eq!(limiter.accessible_checked(), Some(false));
-        assert!(crossfeed.absolute_position().y < room.absolute_position().y);
-        assert!(room.absolute_position().y < limiter.absolute_position().y);
+        assert!(limiter.absolute_position().y > previous_y);
     }
 
     let crossfeed = element(&ui, "Headphone Crossfeed", AccessibleRole::Slider);
+    let crossfeed_amount = element(&ui, "Headphone Crossfeed percent", AccessibleRole::Spinbox);
     crossfeed.set_accessible_value("37");
     let room = element(&ui, "Room Amount", AccessibleRole::Slider);
+    let room_amount = element(&ui, "Room Amount percent", AccessibleRole::Spinbox);
     room.set_accessible_value("44");
     element(&ui, "Output Limiter", AccessibleRole::Checkbox).invoke_accessible_default_action();
     assert_eq!(changes.get(), 3);
     assert_eq!(ui.get_crossfeed_percent(), 37.0);
     assert_eq!(ui.get_room_percent(), 44.0);
     assert!(ui.get_limiter_enabled());
+    i_slint_backend_testing::mock_elapsed_time(std::time::Duration::from_millis(16));
+    assert_eq!(crossfeed_amount.accessible_value().unwrap(), "37");
+    assert_eq!(room_amount.accessible_value().unwrap(), "44");
+
+    crossfeed_amount.invoke_accessible_increment_action();
+    room_amount.set_accessible_value("63");
+    assert_eq!(crossfeed.accessible_value().unwrap().parse::<f32>().unwrap(), 38.0);
+    assert_eq!(room.accessible_value().unwrap().parse::<f32>().unwrap(), 63.0);
+    assert_eq!(changes.get(), 5);
+
+    ui.set_crossfeed_percent(20.0);
+    ui.set_room_percent(100.0);
+    i_slint_backend_testing::mock_elapsed_time(std::time::Duration::from_millis(16));
+    assert_eq!(crossfeed_amount.accessible_value().unwrap(), "20");
+    assert_eq!(room_amount.accessible_value().unwrap(), "100");
+    room_amount.invoke_accessible_increment_action();
+    assert_eq!(ui.get_room_percent(), 100.0);
+    assert_eq!(changes.get(), 5);
+
+    let width = element(&ui, "Stereo Width", AccessibleRole::Slider);
+    let width_amount = element(&ui, "Stereo Width percent", AccessibleRole::Spinbox);
+    let speakers = element(&ui, "Virtual Speakers", AccessibleRole::Slider);
+    let speakers_amount = element(&ui, "Virtual Speakers percent", AccessibleRole::Spinbox);
+    width_amount.set_accessible_value("125");
+    width_amount.invoke_accessible_increment_action();
+    speakers.set_accessible_value("75");
+    i_slint_backend_testing::mock_elapsed_time(std::time::Duration::from_millis(16));
+    assert_eq!(width.accessible_value().unwrap(), "125");
+    assert_eq!(speakers_amount.accessible_value().unwrap(), "75");
+    assert_eq!(changes.get(), 7);
+
     ui.set_crossfeed_available(false);
-    ui.set_room_available(false);
-    assert_eq!(crossfeed.accessible_enabled(), Some(false));
-    assert_eq!(room.accessible_enabled(), Some(false));
+    ui.set_stereo_effects_available(false);
+    for control in [&crossfeed, &crossfeed_amount, &room, &room_amount,
+        &width, &width_amount, &speakers, &speakers_amount]
+    {
+        assert_eq!(control.accessible_enabled(), Some(false));
+    }
 
     ui.set_simple_layout(true);
     open_settings(&ui);
@@ -765,9 +839,46 @@ fn advanced_effects_are_below_the_preamp_in_both_layouts() {
     assert!(ElementHandle::find_by_element_id(&ui, "MainWindow::advanced-panel").next().is_none());
     toggle.invoke_accessible_default_action();
     assert!(ui.get_show_advanced());
-    assert_eq!(ui.get_crossfeed_percent(), 37.0);
-    assert_eq!(ui.get_room_percent(), 44.0);
+    assert_eq!(ui.get_crossfeed_percent(), 20.0);
+    assert_eq!(ui.get_room_percent(), 100.0);
+    assert_eq!(ui.get_stereo_width_percent(), 125.0);
+    assert_eq!(ui.get_virtual_speakers_percent(), 75.0);
     assert!(ui.get_limiter_enabled());
+}
+
+#[test]
+fn all_advanced_controls_scroll_into_view_at_minimum_window_size() {
+    let ui = window();
+    ui.set_connected(true);
+    ui.set_crossfeed_available(true);
+    ui.set_stereo_effects_available(true);
+    ui.set_show_advanced(true);
+    ui.set_limiter_enabled(true);
+    ui.window().set_size(LogicalSize::new(480.0, 360.0));
+    ui.show().unwrap();
+
+    let controls = ["Headphone Crossfeed percent", "Room Amount percent", "Stereo Width percent",
+        "Virtual Speakers percent", "Output Limiter", "Show limiter on EQ graph"];
+    for simple in [false, true] {
+        ui.set_simple_layout(simple);
+        let scroll = ElementHandle::find_by_element_id(&ui, "MainWindow::window-scroll").next().unwrap();
+        let viewport_top = scroll.absolute_position().y + 2.0;
+        let mut visible = [false; 6];
+        for _ in 0..28 {
+            for (seen, label) in visible.iter_mut().zip(controls) {
+                *seen |= ElementHandle::find_by_accessible_label(&ui, label).any(|control| {
+                    let y = control.absolute_position().y;
+                    y >= viewport_top && y + control.size().height <= 358.0
+                });
+            }
+            if visible.iter().all(|seen| *seen) { break; }
+            ui.window().dispatch_event(WindowEvent::PointerScrolled {
+                position: LogicalPosition::new(8.0, 315.0), delta_x: 0.0, delta_y: -45.0,
+            });
+            i_slint_backend_testing::mock_elapsed_time(std::time::Duration::from_millis(250));
+        }
+        assert!(visible.iter().all(|seen| *seen), "simple={simple}: {visible:?}");
+    }
 }
 
 #[test]
@@ -794,10 +905,6 @@ fn limiter_overlay_marks_the_eq_graph_only_while_enabled() {
     assert!(ElementHandle::find_by_accessible_label(&ui, "Limiter −3.0 dB").next().is_some());
     let plot = ElementHandle::find_by_element_id(&ui, "MainWindow::plot").next().unwrap();
     assert!((band().unwrap().absolute_position().x - plot.absolute_position().x - plot.size().width * 0.5).abs() < 1.0);
-
-    ui.set_eq_frequency_scale_index(1);
-    let linear_position = crate::graph::FrequencyScale::Linear.x(20.0 * 1000.0_f64.sqrt()) as f32;
-    assert!((band().unwrap().absolute_position().x - plot.absolute_position().x - plot.size().width * linear_position).abs() < 1.0);
 
     ui.set_bypass(true);
     assert!(band().is_none());
@@ -1003,6 +1110,7 @@ fn window_scroll_reaches_the_last_band() {
 #[test]
 fn preset_naming_can_be_retried_in_the_same_popup() {
     let ui = window();
+    ui.set_simple_layout(true);
     ui.set_presets(Rc::new(VecModel::from(vec![SharedString::from("Flat")])).into());
     let requests = Rc::new(RefCell::new(Vec::new()));
     let capture = requests.clone();
@@ -1019,6 +1127,7 @@ fn preset_naming_can_be_retried_in_the_same_popup() {
     }
     key(&ui, Key::Return);
     assert_eq!(*requests.borrow(), vec![(false, "".into()), (false, "Late Night".into())]);
+    assert!(ElementHandle::find_by_accessible_label(&ui, "Preset saved.").next().is_some());
 }
 
 #[test]
@@ -1254,6 +1363,7 @@ fn navigation_stays_compact_after_window_resize_and_restore() {
 #[test]
 fn tiled_and_portrait_windows_keep_navigation_and_power_in_view() {
     let ui = window();
+    crate::update_eq_frequency_ticks(&ui);
     ui.show().unwrap();
     for (width, height) in [(960.0, 540.0), (1366.0, 384.0), (683.0, 384.0), (540.0, 960.0),
         (540.0, 1920.0), (720.0, 1280.0), (480.0, 360.0)]
@@ -1273,6 +1383,11 @@ fn tiled_and_portrait_windows_keep_navigation_and_power_in_view() {
             if !simple && height < 500.0 {
                 let plot = ElementHandle::find_by_element_id(&ui, "MainWindow::plot").next().unwrap();
                 assert!(plot.absolute_position().y + plot.size().height <= height);
+                for label in ["20 Hz", "20 kHz"] {
+                    let tick = ElementHandle::find_by_accessible_label(&ui, label).next().unwrap();
+                    assert!(tick.absolute_position().y + tick.size().height <= height,
+                        "{label} is outside the initial viewport at {width}×{height}");
+                }
             }
         }
     }

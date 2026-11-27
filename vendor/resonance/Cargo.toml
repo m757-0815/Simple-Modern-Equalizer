@@ -99,7 +99,7 @@ toml = "1.1"
 # runtime, so we enable exactly the features it needs rather than "full" (which
 # drags in the multi-thread scheduler, process, io-std, test-util, …). Smaller
 # build and binary.
-tokio = { version = "1", default-features = false, features = [
+tokio = { version = "1.53.3", default-features = false, features = [
     "rt",
     "macros",
     "net",
@@ -140,7 +140,7 @@ objc2-core-audio-types = "0.3"
 libc = "0.2"
 
 # Real-time audio ring buffer (lock-free SPSC)
-rtrb = "0.3"
+rtrb = "0.3.5"
 
 # Error handling
 thiserror = "2"

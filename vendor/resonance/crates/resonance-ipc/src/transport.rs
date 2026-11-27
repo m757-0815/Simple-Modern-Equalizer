@@ -93,12 +93,10 @@ pub fn read_response<R: Read>(reader: &mut R) -> Result<Response, TransportError
 // #######################################################
 // Cross-platform client transport
 // #######################################################
-//
-// Linux/macOS use a Unix domain socket (filesystem path, per-user perms).
-// Windows has no usable AF_UNIX in std/tokio, so we use a loopback TCP socket
-// on `127.0.0.1`; the daemon binds an ephemeral port and writes it to a port
-// file (see `paths::port_file_path`) that clients read here. Both ends are
-// blocking `Read + Write` streams, so the framing helpers above work unchanged.
+
+#[cfg(windows)]
+#[path = "windows_endpoint.rs"]
+pub mod windows_endpoint;
 
 /// Blocking client stream type: `UnixStream` on Unix, `TcpStream` on Windows.
 #[cfg(unix)]
@@ -106,12 +104,10 @@ pub type ClientStream = std::os::unix::net::UnixStream;
 #[cfg(windows)]
 pub type ClientStream = std::net::TcpStream;
 
-/// Connect to the running daemon. On Unix this dials the Unix socket; on Windows
-/// it reads the daemon's port file and dials `127.0.0.1:<port>`.
+/// Connect to the running daemon through the Unix socket or the Windows endpoint.
 ///
 /// # Errors
-/// Returns an error if the daemon is not running or the socket/port cannot be
-/// reached (on Windows, also if the port file is missing).
+/// Returns an error if the endpoint cannot be opened or the daemon cannot be reached.
 pub fn connect() -> io::Result<ClientStream> {
     #[cfg(unix)]
     {
@@ -119,16 +115,7 @@ pub fn connect() -> io::Result<ClientStream> {
     }
     #[cfg(windows)]
     {
-        let port = crate::paths::read_port_file().ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                "daemon port file not found — is resonanced running?",
-            )
-        })?;
-        // Bounded connect so a stuck/restarting daemon can't hang the caller
-        // (the GUI dials this on its UI thread).
-        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
-        std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(250))
+        windows_endpoint::connect(&crate::paths::port_file_path())
     }
 }
 

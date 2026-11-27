@@ -1,5 +1,7 @@
+use crate::convolution::{BLOCK, ConvolutionEngine, IrData};
 use crate::true_peak::{PHASES, TAPS};
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 // #######################################################
 // blend short stereo reflections into the direct sound
@@ -23,6 +25,159 @@ const ROOM_MAX_WET: f64 = 0.42;
 
 fn frames(sample_rate: f64, milliseconds: f64) -> usize {
     (sample_rate * milliseconds / 1000.0).ceil().max(1.0) as usize
+}
+
+// #######################################################
+// render a front speaker pair and adjust stereo width
+// #######################################################
+
+// Diffuse-field equalized MIT KEMAR responses at +30°, 0° elevation.
+// Mirroring the pair places the other speaker at −30°. See third-party notices.
+const SPEAKER_RATE: f64 = 44_100.0;
+const SPEAKER_PCM: &[u8; 128 * 4] = include_bytes!("kemar-30-deg.pcm");
+const NEAR_PEAK_FRAME: f64 = 17.0;
+// Level-match the measured pair to dry playback for broadband material.
+const SPEAKER_GAIN: f64 = 0.75 / 32768.0;
+const SPATIAL_RAMP_MS: f64 = 15.0;
+
+#[derive(Clone, Debug)]
+pub struct Spatial {
+    width: f64,
+    applied_width: f64,
+    amount: f64,
+    applied_amount: f64,
+    aligned_mix: f64,
+    ramp_frames: usize,
+    speakers: ConvolutionEngine,
+    dry_delay: Vec<[f64; 2]>,
+    cursor: usize,
+    primed: usize,
+    prime_frames: usize,
+}
+
+impl Spatial {
+    pub fn new(channels: usize, rate: f64) -> Self {
+        let mut speakers = ConvolutionEngine::new(2, rate);
+        let mut dry_delay = Vec::new();
+        let mut prime_frames = 0;
+        if channels == 2 {
+            let (mut mid, mut side) = (Vec::new(), Vec::new());
+            for frame in SPEAKER_PCM.chunks_exact(4) {
+                let far = f64::from(i16::from_le_bytes([frame[0], frame[1]]));
+                let near = f64::from(i16::from_le_bytes([frame[2], frame[3]]));
+                // Symmetric near/far paths diagonalize into two independent FIRs.
+                mid.push((near + far) * SPEAKER_GAIN);
+                side.push((near - far) * SPEAKER_GAIN);
+            }
+            let ir = IrData {
+                name: "Virtual Speakers".into(), path: String::new(),
+                sample_rate: SPEAKER_RATE, channels: vec![mid, side],
+            };
+            let response_frames = (ir.frames() as f64 * rate / SPEAKER_RATE).ceil() as usize;
+            if speakers.load_ir(Arc::new(ir)).is_ok() {
+                let latency = speakers.latency_frames();
+                let peak = (NEAR_PEAK_FRAME * rate / SPEAKER_RATE).round() as usize;
+                dry_delay.resize(latency + peak, [0.0; 2]);
+                prime_frames = latency + response_frames;
+            }
+        }
+        Self {
+            width: 1.0, applied_width: 1.0, amount: 0.0, applied_amount: 0.0, aligned_mix: 0.0,
+            ramp_frames: frames(rate, SPATIAL_RAMP_MS), speakers, dry_delay,
+            cursor: 0, primed: 0, prime_frames,
+        }
+    }
+
+    #[must_use]
+    pub fn settings(&self) -> (f64, f64) {
+        (self.width, self.amount)
+    }
+
+    pub fn set(&mut self, width: f64, virtual_speakers: f64) {
+        self.width = if width.is_finite() { width.clamp(0.0, 1.25) } else { 1.0 };
+        self.amount = if virtual_speakers.is_finite() { virtual_speakers.clamp(0.0, 1.0) } else { 0.0 };
+    }
+
+    #[must_use]
+    pub fn warmup_frames(&self) -> usize {
+        if self.amount > 0.0 && self.prime_frames > 0 {
+            self.prime_frames + self.ramp_frames
+        } else if self.width != 1.0 {
+            self.ramp_frames
+        } else {
+            0
+        }
+    }
+
+    fn reset_speakers(&mut self) {
+        self.speakers.reset();
+        self.dry_delay.fill([0.0; 2]);
+        self.cursor = 0;
+        self.primed = 0;
+        self.applied_amount = 0.0;
+        self.aligned_mix = 0.0;
+    }
+
+    pub fn reset(&mut self) {
+        self.applied_width = self.width;
+        self.reset_speakers();
+    }
+
+    pub fn process(&mut self, samples: &mut [f64], channels: usize) {
+        if channels != 2 {
+            return;
+        }
+        let step = 1.0 / self.ramp_frames as f64;
+        if !self.dry_delay.is_empty() && (self.amount > 0.0 || self.aligned_mix > 0.0) {
+            self.process_speakers(samples, step);
+        }
+        if self.width != 1.0 || self.applied_width != 1.0 {
+            for frame in samples.chunks_exact_mut(2) {
+                self.applied_width += (self.width - self.applied_width).clamp(-step, step);
+                // Adjust the difference channel while leaving the center gain alone.
+                let delta = (frame[0] - frame[1]) * (self.applied_width - 1.0) * 0.5;
+                frame[0] += delta;
+                frame[1] -= delta;
+            }
+        }
+        if self.amount == 0.0 && self.aligned_mix == 0.0 && self.primed > 0 {
+            self.reset_speakers();
+        }
+    }
+
+    fn process_speakers(&mut self, samples: &mut [f64], step: f64) {
+        let target_alignment = f64::from(u8::from(self.amount > 0.0));
+        let mut scratch = [0.0; 2 * BLOCK];
+        // Small, bounded blocks use the convolver's existing preallocated FIFOs.
+        for chunk in samples.chunks_mut(scratch.len()) {
+            let processed = &mut scratch[..chunk.len() - chunk.len() % 2];
+            for (input, filter) in chunk.chunks_exact(2).zip(processed.chunks_exact_mut(2)) {
+                filter[0] = (input[0] + input[1]) * 0.5;
+                filter[1] = (input[0] - input[1]) * 0.5;
+            }
+            self.speakers.process(processed, 2);
+            for (output, filtered) in chunk.chunks_exact_mut(2).zip(processed.chunks_exact(2)) {
+                let delayed = std::mem::replace(&mut self.dry_delay[self.cursor], [output[0], output[1]]);
+                self.cursor += 1;
+                if self.cursor == self.dry_delay.len() {
+                    self.cursor = 0;
+                }
+                if self.primed < self.prime_frames {
+                    self.primed += 1;
+                    continue;
+                }
+                self.applied_amount += (self.amount - self.applied_amount).clamp(-step, step);
+                self.aligned_mix += (target_alignment - self.aligned_mix).clamp(-step, step);
+                let binaural = [filtered[0] + filtered[1], filtered[0] - filtered[1]];
+                for (sample, (dry, wet)) in output.iter_mut().zip(delayed.into_iter().zip(binaural)) {
+                    // At a steady blend, align the dry path to the nearer ear.
+                    // Fade to and from the undelayed path only on enable/disable.
+                    let aligned = dry + (wet - dry) * self.applied_amount;
+                    *sample += (aligned - *sample) * self.aligned_mix;
+                }
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -226,6 +381,68 @@ impl Limiter {
 mod tests {
     use super::*;
     use crate::true_peak::Meter;
+
+    #[test]
+    fn width_preserves_the_center_and_returns_to_exact_passthrough() {
+        let rate = 48_000.0;
+        let mut spatial = Spatial::new(2, rate);
+        let input = [0.5, -0.25];
+        let mut dry = input;
+        spatial.process(&mut dry, 2);
+        assert_eq!(dry, input);
+        spatial.set(0.0, 0.0);
+        let mut audio = input.repeat(frames(rate, 20.0));
+        spatial.process(&mut audio, 2);
+        assert!((audio[0] - input[0]).abs() < 0.001);
+        assert_eq!(&audio[audio.len() - 2..], &[0.125, 0.125]);
+        spatial.set(1.25, 0.0);
+        let mut wider = input.repeat(frames(rate, 22.0));
+        spatial.process(&mut wider, 2);
+        assert_eq!(&wider[wider.len() - 2..], &[0.59375, -0.34375]);
+        spatial.set(1.0, 0.0);
+        spatial.process(&mut wider, 2);
+        spatial.process(&mut dry, 2);
+        assert_eq!(dry, input);
+    }
+
+    #[test]
+    fn virtual_speakers_render_mirrored_ear_responses_at_playback_rates() {
+        for rate in [44_100.0, 48_000.0, 192_000.0] {
+            let mut spatial = Spatial::new(2, rate);
+            spatial.set(1.0, 1.0);
+            spatial.process(&mut vec![0.0; spatial.warmup_frames() * 2 + 2], 2);
+            let mut left = vec![0.0; frames(rate, 20.0) * 2];
+            let mut right = left.clone();
+            left[0] = 1.0;
+            right[1] = 1.0;
+            let mut other = spatial.clone();
+            for chunk in left.chunks_mut(62) {
+                spatial.process(chunk, 2);
+            }
+            other.process(&mut right, 2);
+            for (l, r) in left.chunks_exact(2).zip(right.chunks_exact(2)) {
+                assert!((l[0] - r[1]).abs() < 1e-12 && (l[1] - r[0]).abs() < 1e-12);
+            }
+            let peak = |channel: usize| left.chunks_exact(2).enumerate()
+                .map(|(index, frame)| (index, frame[channel].abs()))
+                .max_by(|a, b| a.1.total_cmp(&b.1)).unwrap();
+            let (near_frame, near) = peak(0);
+            let (far_frame, far) = peak(1);
+            assert!(near > far && far > 0.015);
+            assert!(far_frame > near_frame && near_frame >= BLOCK);
+
+            spatial.set(1.0, 0.0);
+            spatial.process(&mut vec![0.0; frames(rate, 20.0) * 2], 2);
+            let mut dry = [0.2, 0.5];
+            spatial.process(&mut dry, 2);
+            assert_eq!(dry, [0.2, 0.5]);
+            spatial.set(0.0, 1.0);
+            let mut multichannel = [0.1, -0.2, 0.3, -0.4, 0.5, -0.6];
+            let original = multichannel;
+            spatial.process(&mut multichannel, 6);
+            assert_eq!(multichannel, original);
+        }
+    }
 
     #[test]
     fn room_adds_delayed_stereo_reflections_and_defaults_to_dry() {

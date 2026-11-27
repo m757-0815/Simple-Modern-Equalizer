@@ -3,7 +3,7 @@ use resonance_dsp::channel::{ChannelMask, ChannelMatrix};
 use resonance_dsp::{chain::FxEffect, chain::ProcessorChain};
 use resonance_ipc::{
     AppStream, BandAudition, BandDynamics, BandScope, BandState, BandType, ConvolutionState,
-    DaemonState, EffectsState, FxEffectId, OutputEffects, RoutingMatrix, SinkVolume, default_channel_layout,
+    DaemonState, EffectsState, FxEffectId, OutputEffects, RoutingMatrix, SinkVolume, SpatialEffects, default_channel_layout,
 };
 use rtrb::Producer;
 use std::sync::{Arc, Mutex};
@@ -54,6 +54,7 @@ pub enum AudioCommand {
         on: bool,
     },
     SetOutputEffects(OutputEffects),
+    SetSpatialEffects(SpatialEffects),
     /// Set (or clear) the final-stage output dither target bit depth.
     SetDither {
         bits: Option<u32>,

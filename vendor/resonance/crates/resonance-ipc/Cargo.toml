@@ -24,10 +24,12 @@ toml = { workspace = true }
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
 
-# PID-liveness check for the single-instance guard (no flock on Windows).
+# Protect the local IPC endpoint and check daemon PID liveness on Windows.
 [target.'cfg(windows)'.dependencies]
+subtle = "2.6.1"
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
+    "Win32_Security_Cryptography",
     "Win32_System_Threading",
 ] }
 

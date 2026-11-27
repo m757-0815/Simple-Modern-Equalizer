@@ -24,7 +24,7 @@ mod ui_tests;
 
 use config::Config;
 use plot_canvas::RasterSize;
-use presets::{Crossfeed, DisplayPreferences, Preferences, Preset};
+use presets::{Crossfeed, DisplayPreferences, Preferences, Preset, SpatialSettings};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::{cell::RefCell, collections::VecDeque, fs, path::{Path, PathBuf}, rc::Rc, sync::mpsc, time::{Duration, Instant}};
 slint::include_modules!();
@@ -191,15 +191,13 @@ impl App {
         let eq = ui.get_eq_plot_height().round().max(130.0) as i32;
         let live = ui.get_live_view_height().round().clamp(146.0, 420.0) as i32;
         let range = ui.get_eq_range_db().clamp(1, 24);
-        let scale = graph::FrequencyScale::from_index(ui.get_eq_frequency_scale_index());
         if eq != self.preferences.eq_plot_height || live != self.preferences.live_view_height() as i32
-            || range != self.preferences.eq_range_db || scale != self.preferences.display.eq_frequency_scale
+            || range != self.preferences.eq_range_db
         {
             let mut preferences = self.preferences.clone();
             preferences.eq_plot_height = eq;
             preferences.live_view_height = Some(live);
             preferences.eq_range_db = range;
-            preferences.display.eq_frequency_scale = scale;
             preferences.save(&self.directory)?;
             self.preferences = preferences;
         }
@@ -227,26 +225,37 @@ impl App {
             .copied().unwrap_or_default()
     }
 
-    fn room_output(&self) -> Option<&str> {
-        self.crossfeed_output().filter(|_| self.format.as_ref().is_some_and(|format| format.channels == 2))
+    fn stereo_output(&self) -> Option<&str> {
+        let format = self.format.as_ref()?;
+        format.output.as_deref().filter(|_| format.channels == 2)
     }
 
     fn room_percent(&self) -> u8 {
-        self.room_output().and_then(|output| self.preferences.headphone_room_percent.get(output))
+        self.stereo_output().and_then(|output| self.preferences.headphone_room_percent.get(output))
             .copied().unwrap_or_default().min(100)
     }
 
+    fn spatial_settings(&self) -> SpatialSettings {
+        self.stereo_output().and_then(|output| self.preferences.output_spatial.get(output))
+            .copied().unwrap_or_default().bounded()
+    }
+
     fn playback_effects(&self) -> engine::PlaybackEffects {
+        let spatial = self.spatial_settings();
         engine::PlaybackEffects {
             crossfeed: self.crossfeed(),
             output: resonance_ipc::OutputEffects {
                 room_amount: f64::from(self.room_percent()) / 100.0,
                 limiter_enabled: self.preferences.limiter_enabled,
             },
+            spatial: resonance_ipc::SpatialEffects {
+                width: f64::from(spatial.width_percent) / 100.0,
+                virtual_speakers: f64::from(spatial.virtual_speakers_percent) / 100.0,
+            },
         }
     }
 
-    fn set_advanced_effects(&mut self, crossfeed: Crossfeed, room: u8, limiter: bool) -> bool {
+    fn set_advanced_effects(&mut self, crossfeed: Crossfeed, room: u8, limiter: bool, spatial: SpatialSettings) -> bool {
         let before = self.playback_effects();
         if before.crossfeed != crossfeed && let Some(output) = self.crossfeed_output().map(str::to_owned) {
             if crossfeed.percent() == 0 {
@@ -255,11 +264,21 @@ impl App {
                 self.preferences.headphone_crossfeed.insert(output, crossfeed);
             }
         }
-        if self.room_percent() != room && let Some(output) = self.room_output().map(str::to_owned) {
-            if room == 0 {
-                self.preferences.headphone_room_percent.remove(&output);
-            } else {
-                self.preferences.headphone_room_percent.insert(output, room.min(100));
+        if let Some(output) = self.stereo_output().map(str::to_owned) {
+            if self.room_percent() != room {
+                if room == 0 {
+                    self.preferences.headphone_room_percent.remove(&output);
+                } else {
+                    self.preferences.headphone_room_percent.insert(output.clone(), room.min(100));
+                }
+            }
+            let spatial = spatial.bounded();
+            if self.spatial_settings() != spatial {
+                if spatial == SpatialSettings::default() {
+                    self.preferences.output_spatial.remove(&output);
+                } else {
+                    self.preferences.output_spatial.insert(output, spatial);
+                }
             }
         }
         self.preferences.limiter_enabled = limiter;
@@ -474,9 +493,9 @@ fn frequency_tick(frequency: u32, position: f32) -> FrequencyTick {
 }
 
 fn update_eq_frequency_ticks(ui: &MainWindow) {
-    let scale = graph::FrequencyScale::from_index(ui.get_eq_frequency_scale_index());
-    let ticks = scale.labeled_frequencies().into_iter()
-        .map(|frequency| frequency_tick(frequency, scale.x(f64::from(frequency)) as f32)).collect::<Vec<_>>();
+    let ticks = graph::FREQUENCY_LABELS.into_iter()
+        .map(|frequency| frequency_tick(frequency, graph::frequency_position(f64::from(frequency)) as f32))
+        .collect::<Vec<_>>();
     ui.set_eq_frequency_ticks(Rc::new(VecModel::from(ticks)).into());
 }
 
@@ -492,7 +511,6 @@ fn draw_eq_graph(ui: &MainWindow, app: &mut App) {
     let overlay = if ui.get_show_eq_spectrum() { &app.plot_spectrum[..] } else { &[] };
     app.plot.set_colors(app.preferences.colors);
     app.plot.set_range(ui.get_eq_range_db());
-    app.plot.set_frequency_scale(graph::FrequencyScale::from_index(ui.get_eq_frequency_scale_index()));
     app.plot.set_phase_mode(app.preferences.phase_mode);
     if let Some(frame) = app.plot.frame(&app.effective, overlay, rate, size) {
         ui.set_graph(slint::Image::from_rgba8(frame));
@@ -555,8 +573,11 @@ fn keep_widget_accent(ui: &MainWindow) -> slint::private_unstable_api::re_export
 fn update_advanced_controls(ui: &MainWindow, app: &App) {
     ui.set_crossfeed_available(app.crossfeed_output().is_some());
     ui.set_crossfeed_percent(f32::from(app.crossfeed().percent()));
-    ui.set_room_available(app.room_output().is_some());
+    ui.set_stereo_effects_available(app.stereo_output().is_some());
     ui.set_room_percent(f32::from(app.room_percent()));
+    let spatial = app.spatial_settings();
+    ui.set_stereo_width_percent(f32::from(spatial.width_percent));
+    ui.set_virtual_speakers_percent(f32::from(spatial.virtual_speakers_percent));
     ui.set_limiter_enabled(app.preferences.limiter_enabled);
 }
 
@@ -1027,7 +1048,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .collect::<Vec<_>>();
     ui.set_live_frequency_ticks(Rc::new(VecModel::from(frequency_ticks)).into());
     ui.set_eq_range_db(app.borrow().preferences.eq_range_db());
-    ui.set_eq_frequency_scale_index(app.borrow().preferences.display.eq_frequency_scale.index());
     update_eq_frequency_ticks(&ui);
     update_controls(&ui, &app.borrow());
     update_phase_setting(&ui, &app.borrow());
@@ -1129,12 +1149,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         refresh_band_rows(&w, cfg);
         draw_eq_graph(&w, &mut a);
     });
-    on_ui_action!(on_change_eq_frequency_scale, |w, a, | {
-        a.drag_origin = None;
-        w.invoke_cancel_graph_drag();
-        update_eq_frequency_ticks(&w);
-        draw_eq_graph(&w, &mut a);
-    });
     on_ui_action!(on_change_tone, |w, a, bass, mid, treble, loudness| {
         if (a.simple.bass, a.simple.mid, a.simple.treble, a.simple.loudness) == (bass, mid, treble, loudness) {
             return;
@@ -1169,7 +1183,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         on_ui_action!(on_change_advanced_effects, |w, a, | {
             let crossfeed = Crossfeed::new(w.get_crossfeed_percent().round() as u8);
             let room = w.get_room_percent().round().clamp(0.0, 100.0) as u8;
-            let changed = a.set_advanced_effects(crossfeed, room, w.get_limiter_enabled());
+            let spatial = SpatialSettings {
+                width_percent: w.get_stereo_width_percent().round() as u8,
+                virtual_speakers_percent: w.get_virtual_speakers_percent().round() as u8,
+            };
+            let changed = a.set_advanced_effects(crossfeed, room, w.get_limiter_enabled(), spatial);
             update_advanced_controls(&w, &a);
             if changed {
                 // Apply each slider change live and save after the slider settles.
@@ -1293,7 +1311,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         {
             return;
         }
-        let (frequency, gain) = a.plot.axis.band_values(a.plot.frequency_scale, x.into(), y.into());
+        let (frequency, gain) = a.plot.axis.band_values(x.into(), y.into());
         let mut config = a.cfg.clone();
         let index = config.bands.partition_point(|band| band.frequency_hz <= frequency);
         if config.add_peak(frequency, gain) {
@@ -1313,7 +1331,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             a.edit_group = None;
             let hit = graph::hit_band(&a.plot.dots, x.into(), y.into(), width.into(), height.into());
             a.drag_origin = hit.and_then(|index| a.cfg.bands.get(index).map(|band| {
-                graph::BandDrag::new(index, band).with_axes(a.plot.axis, a.plot.frequency_scale)
+                graph::BandDrag::new(index, band).with_gain_axis(a.plot.axis)
             }));
             a.drag_origin.map_or(-1, |drag| drag.index as i32)
         });
@@ -1807,7 +1825,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         limiter_overlay: ui.get_show_limiter_overlay(),
         preset_button: ui.get_show_preset_button(),
         eq_spectrum: ui.get_show_eq_spectrum(),
-        eq_frequency_scale: graph::FrequencyScale::from_index(ui.get_eq_frequency_scale_index()),
     };
     a.save_graph_view(&ui)?;
     a.preferences.save(&a.directory)?;
@@ -1819,37 +1836,45 @@ mod tests {
     use super::*;
 
     #[test]
-    fn headphone_effects_are_saved_for_each_output() {
+    fn stereo_effects_are_saved_for_each_output() {
         let mut app = app_for_preset_tests(Config::default());
         let mut format = engine::AudioFormat { channels: 2, sample_rate: 48_000.0, output: Some("Headphones".into()) };
         app.format = Some(format.clone());
         assert_eq!(app.crossfeed().percent(), 0);
         assert_eq!(app.room_percent(), 0);
+        let neutral = SpatialSettings::default();
+        assert_eq!(app.spatial_settings(), neutral);
         assert!(!app.preferences.limiter_enabled);
-        assert!(app.set_advanced_effects(Crossfeed::new(37), 44, true));
+        let spatial = SpatialSettings { width_percent: 117, virtual_speakers_percent: 65 };
+        assert!(app.set_advanced_effects(Crossfeed::new(37), 44, true, spatial));
         app.preferences.save(&app.directory).unwrap();
         let saved: Preferences = serde_json::from_str(&storage::read_text(&app.directory.join("preferences.json")).unwrap()).unwrap();
         assert_eq!(saved.headphone_crossfeed["Headphones"].percent(), 37);
         assert_eq!(saved.headphone_room_percent["Headphones"], 44);
+        assert_eq!(saved.output_spatial["Headphones"], spatial);
         assert!(saved.limiter_enabled);
 
         format.output = Some("HDMI".into());
         app.format = Some(format.clone());
         assert_eq!(app.crossfeed().percent(), 0);
         assert_eq!(app.room_percent(), 0);
+        assert_eq!(app.spatial_settings(), neutral);
         assert!(app.playback_effects().output.limiter_enabled);
         format.output = Some("Headphones".into());
         format.channels = 1;
         app.format = Some(format.clone());
         assert_eq!(app.crossfeed().percent(), 0);
-        assert!(!app.set_advanced_effects(Crossfeed::new(25), 100, true));
+        assert_eq!(app.spatial_settings(), neutral);
+        assert!(!app.set_advanced_effects(Crossfeed::new(25), 100, true, neutral));
         format.channels = 2;
         app.format = Some(format);
         assert_eq!(app.crossfeed().percent(), 37);
         assert_eq!(app.room_percent(), 44);
-        assert!(app.set_advanced_effects(Crossfeed::default(), 0, false));
+        assert_eq!(app.spatial_settings(), spatial);
+        assert!(app.set_advanced_effects(Crossfeed::default(), 0, false, neutral));
         assert!(app.preferences.headphone_crossfeed.is_empty());
         assert!(app.preferences.headphone_room_percent.is_empty());
+        assert!(app.preferences.output_spatial.is_empty());
         fs::remove_dir_all(&app.directory).unwrap();
     }
 

@@ -41,10 +41,10 @@ try {
     Copy-Item -LiteralPath 'ui/fonts/OFL.txt' -Destination (Join-Path $stage 'Inter-OFL.txt')
 
     #######################################################
-    # generate the WiX installer from the staged files
+    # generate the experimental WiX installer
     #######################################################
 
-    $installer = Join-Path $projectRoot 'dist/SimpleModernEqualizer-Setup-x64.msi'
+    $installer = Join-Path $projectRoot 'dist/SimpleModernEqualizer-Experimental-Setup-x64.msi'
     $wixArgs = @('build', 'packaging/windows.wxs', '-arch', 'x64', '-ext', $WixExtension,
         '-d', "StageDir=$stage", '-d', "ProductVersion=$version", '-o', $installer)
     # WiX can be supplied as a native tool or a .NET assembly.

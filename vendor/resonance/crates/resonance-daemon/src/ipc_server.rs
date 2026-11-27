@@ -7,7 +7,7 @@ use resonance_dsp::convolution::{ConvolutionEngine, IrData, MAX_IR_SECONDS};
 use resonance_dsp::filter::{ApoFilter, FilterError, FilterType};
 use resonance_ipc::{
     AbSlot, BandScope, BandState, BandType, ChannelMask, Command, EffectsState, FxEffectId,
-    OutputEffects, Response, RoutingMatrix,
+    OutputEffects, Response, RoutingMatrix, SpatialEffects,
 };
 use resonance_preset::model::{ApoFilterType, EqBand};
 use resonance_preset::{
@@ -16,18 +16,31 @@ use resonance_preset::{
 };
 use tracing::{error, info, warn};
 
+// #######################################################
+// restrict the local IPC listener to the daemon user
+// #######################################################
+
 #[cfg(unix)]
 pub async fn run(state: SharedState) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
     use tokio::net::UnixListener;
     let sock_path = crate::shutdown::socket_path();
     let _ = tokio::fs::remove_file(&sock_path).await;
 
     let listener = UnixListener::bind(&sock_path)?;
+    tokio::fs::set_permissions(&sock_path, std::fs::Permissions::from_mode(0o600)).await?;
+    // SAFETY: geteuid has no arguments or memory requirements.
+    let owner = unsafe { libc::geteuid() };
     info!("IPC listening on {}", sock_path.display());
 
     loop {
         match listener.accept().await {
-            Ok((stream, _)) => spawn_client(stream, state.clone()),
+            Ok((stream, _)) => {
+                // Check OS credentials even on Unix systems that ignore socket mode bits.
+                if stream.peer_cred().is_ok_and(|peer| peer.uid() == owner) {
+                    spawn_client(stream, state.clone());
+                }
+            }
             Err(e) => error!("accept error: {e}"),
         }
     }
@@ -35,26 +48,43 @@ pub async fn run(state: SharedState) -> Result<()> {
 
 #[cfg(windows)]
 pub async fn run(state: SharedState) -> Result<()> {
+    use resonance_ipc::transport::windows_endpoint as endpoint;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
-    // Windows has no usable AF_UNIX in tokio; bind a loopback TCP socket on an
-    // ephemeral port and advertise it via the port file so clients can dial it.
+
     let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
     let port = listener.local_addr()?.port();
     let port_file = resonance_ipc::paths::port_file_path();
-    if let Some(dir) = port_file.parent() {
-        let _ = tokio::fs::create_dir_all(dir).await;
+    if let Some(dir) = port_file.parent().filter(|dir| !dir.as_os_str().is_empty()) {
+        tokio::fs::create_dir_all(dir).await?;
     }
-    tokio::fs::write(&port_file, port.to_string()).await?;
-    info!(
-        "IPC listening on 127.0.0.1:{port} (port file {})",
-        port_file.display()
-    );
+    let token = endpoint::publish(&port_file, port)?;
+    info!("IPC listening on 127.0.0.1:{port}");
 
     loop {
         match listener.accept().await {
-            Ok((stream, _)) => {
-                let _ = stream.set_nodelay(true);
-                spawn_client(stream, state.clone());
+            Ok((mut stream, _)) => {
+                let state = state.clone();
+                tokio::spawn(async move {
+                    // Give unauthenticated connections only a short time to present the token.
+                    let authenticate = async {
+                        let mut received = endpoint::Token::default();
+                        stream.read_exact(&mut received).await?;
+                        if !endpoint::token_matches(&token, &received) {
+                            return Ok(false);
+                        }
+                        stream.write_all(&[endpoint::ACCEPTED]).await?;
+                        Ok::<_, std::io::Error>(true)
+                    };
+                    if let Ok(Ok(true)) =
+                        tokio::time::timeout(endpoint::HANDSHAKE_TIMEOUT, authenticate).await
+                    {
+                        let _ = stream.set_nodelay(true);
+                        if let Err(e) = handle_client(stream, state).await {
+                            warn!("client error: {e}");
+                        }
+                    }
+                });
             }
             Err(e) => error!("accept error: {e}"),
         }
@@ -65,7 +95,8 @@ pub async fn run(state: SharedState) -> Result<()> {
 // serve commands over each client connection
 // #######################################################
 
-/// Spawn a task to service one client connection over any async stream.
+/// Spawn a task to service an authorized Unix connection.
+#[cfg(unix)]
 fn spawn_client<S>(stream: S, state: SharedState)
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Unpin + 'static,
@@ -137,6 +168,7 @@ async fn dispatch(cmd: Command, state: &SharedState) -> Response {
             | Command::SetBandChannels { .. }
             | Command::ApplyState { .. }
             | Command::ApplyStateWithOutputEffects { .. }
+            | Command::ApplyStateWithSpatialEffects { .. }
             | Command::Reset
             | Command::LoadPreset { .. }
             | Command::LoadProfile { .. }
@@ -228,12 +260,20 @@ async fn dispatch_inner(cmd: Command, state: &SharedState) -> Response {
             enabled,
             bands,
             effects,
-        } => handle_apply_state(state, preamp_db, enabled, bands, effects, OutputEffects::default()),
+        } => handle_apply_state(state, preamp_db, enabled, bands, effects, OutputEffects::default(), SpatialEffects::default()),
         Command::ApplyStateWithOutputEffects { preamp_db, enabled, bands, effects, output_effects } => {
-            handle_apply_state(state, preamp_db, enabled, bands, effects, output_effects)
+            handle_apply_state(state, preamp_db, enabled, bands, effects, output_effects, SpatialEffects::default())
+        }
+        Command::ApplyStateWithSpatialEffects { preamp_db, enabled, bands, effects, output_effects, spatial_effects } => {
+            handle_apply_state(state, preamp_db, enabled, bands, effects, output_effects, spatial_effects)
         }
         Command::SetOutputEffects(effects) => {
             let command = || AudioCommand::SetOutputEffects(effects);
+            state.send(command(), |chain| crate::audio::apply_command(chain, command()));
+            Response::Ok
+        }
+        Command::SetSpatialEffects(effects) => {
+            let command = || AudioCommand::SetSpatialEffects(effects);
             state.send(command(), |chain| crate::audio::apply_command(chain, command()));
             Response::Ok
         }
@@ -272,19 +312,25 @@ async fn dispatch_inner(cmd: Command, state: &SharedState) -> Response {
         Command::ReadTruePeak { .. } => Response::Error("Daemon true-peak capture requires PipeWire".into()),
         #[cfg(target_os = "linux")]
         Command::ApplyPlayback { preamp_db, enabled, bands, routing, convolution } => {
-            handle_apply_playback(state, preamp_db, enabled, bands, routing, convolution, EffectsState::default(), OutputEffects::default()).await
+            handle_apply_playback(state, preamp_db, enabled, bands, routing, convolution, EffectsState::default(), OutputEffects::default(), SpatialEffects::default()).await
         }
         #[cfg(target_os = "linux")]
         Command::ApplyPlaybackWithEffects { preamp_db, enabled, bands, routing, convolution, effects } => {
-            handle_apply_playback(state, preamp_db, enabled, bands, routing, convolution, effects, OutputEffects::default()).await
+            handle_apply_playback(state, preamp_db, enabled, bands, routing, convolution, effects, OutputEffects::default(), SpatialEffects::default()).await
         }
         #[cfg(target_os = "linux")]
         Command::ApplyAdvancedPlayback { preamp_db, enabled, bands, routing, convolution, effects, output_effects } => {
-            handle_apply_playback(state, preamp_db, enabled, bands, routing, convolution, effects, output_effects).await
+            handle_apply_playback(state, preamp_db, enabled, bands, routing, convolution, effects, output_effects, SpatialEffects::default()).await
+        }
+        #[cfg(target_os = "linux")]
+        Command::ApplySpatialPlayback { preamp_db, enabled, bands, routing, convolution, effects, output_effects, spatial_effects } => {
+            handle_apply_playback(state, preamp_db, enabled, bands, routing, convolution, effects, output_effects, spatial_effects).await
         }
         #[cfg(not(target_os = "linux"))]
         Command::ApplyPlayback { .. } | Command::ApplyPlaybackWithEffects { .. }
-        | Command::ApplyAdvancedPlayback { .. } => Response::Error("Playback transitions require PipeWire".into()),
+        | Command::ApplyAdvancedPlayback { .. } | Command::ApplySpatialPlayback { .. } => {
+            Response::Error("Playback transitions require PipeWire".into())
+        }
         Command::ResetAndExportChain { path } => handle_reset_and_export_chain(state, &path),
         // The actual cleanup + exit happens in `handle_client` after this Ok is
         // flushed to the client (see the `is_shutdown` branch there).
@@ -306,6 +352,7 @@ async fn handle_apply_playback(
     convolution: Option<String>,
     effects: EffectsState,
     output_effects: OutputEffects,
+    spatial_effects: SpatialEffects,
 ) -> Response {
     let (channels, rate) = {
         let inner = state.0.lock().unwrap();
@@ -327,6 +374,7 @@ async fn handle_apply_playback(
     let prepared = tokio::task::spawn_blocking(move || -> Result<_, String> {
         let mut chain = profile.into_chain(channels, rate);
         crate::audio::apply_command(&mut chain, AudioCommand::SetOutputEffects(output_effects));
+        crate::audio::apply_command(&mut chain, AudioCommand::SetSpatialEffects(spatial_effects));
         if let Some(matrix) = routing {
             if matrix.in_ch != channels || matrix.out_ch != channels {
                 return Err("The output channel count changed during playback preparation.".into());
@@ -346,6 +394,7 @@ async fn handle_apply_playback(
         if chain.room.amount() > 0.0 && channels == 2 {
             warmup_frames = warmup_frames.max(chain.room.warmup_frames());
         }
+        warmup_frames += chain.spatial.warmup_frames();
         if chain.limiter.enabled() {
             warmup_frames += (rate * 0.008).ceil() as usize;
         }
@@ -1160,6 +1209,7 @@ fn handle_apply_state(
     bands: Vec<BandState>,
     effects: EffectsState,
     output_effects: OutputEffects,
+    spatial_effects: SpatialEffects,
 ) -> Response {
     let snap = state.snapshot();
     let profile = Profile {
@@ -1177,7 +1227,7 @@ fn handle_apply_state(
         }),
         phase_mode: snap.phase_mode_linear,
     };
-    apply_profile_chain_with_output_effects(&profile, state, output_effects);
+    apply_profile_chain_with_output_effects(&profile, state, output_effects, spatial_effects);
     info!("bulk state applied (ApplyState: undo/redo or bulk edit)");
     Response::Ok
 }
@@ -1434,10 +1484,12 @@ fn load_profile(name: &str, state: &SharedState) -> Result<(), String> {
 /// A/B recall never re-hit the disk). A missing or corrupt IR file drops the
 /// stage with a warning instead of failing the whole profile apply.
 pub(crate) fn apply_profile_chain(profile: &Profile, state: &SharedState) {
-    apply_profile_chain_with_output_effects(profile, state, OutputEffects::default());
+    apply_profile_chain_with_output_effects(profile, state, OutputEffects::default(), SpatialEffects::default());
 }
 
-fn apply_profile_chain_with_output_effects(profile: &Profile, state: &SharedState, output_effects: OutputEffects) {
+fn apply_profile_chain_with_output_effects(
+    profile: &Profile, state: &SharedState, output_effects: OutputEffects, spatial_effects: SpatialEffects,
+) {
     let ir = profile
         .convolution
         .as_ref()
@@ -1446,6 +1498,7 @@ fn apply_profile_chain_with_output_effects(profile: &Profile, state: &SharedStat
     state.rebuild_chain(|ch, sr| {
         let mut chain = profile.clone().into_chain(ch, sr);
         crate::audio::apply_command(&mut chain, AudioCommand::SetOutputEffects(output_effects));
+        crate::audio::apply_command(&mut chain, AudioCommand::SetSpatialEffects(spatial_effects));
         if let Some(ir) = ir.clone() {
             match chain.convolution.load_ir(ir) {
                 Ok(()) => chain.convolution.set_enabled(conv_enabled),
@@ -1633,6 +1686,29 @@ mod tests {
         let mut signal = [0.75, 0.0].repeat(warmup_frames);
         chain.process(&mut signal);
         assert!((signal.last().unwrap() - 0.15).abs() < 0.001);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn spatial_settings_install_atomically_and_adjust_in_place() {
+        let (state, mut rx) = test_state();
+        let spatial = SpatialEffects { width: 1.25, virtual_speakers: 0.7 };
+        let command = Command::ApplySpatialPlayback {
+            preamp_db: 0.0, enabled: true, bands: Vec::new(), routing: None, convolution: None,
+            effects: EffectsState::default(), output_effects: OutputEffects::default(), spatial_effects: spatial,
+        };
+        assert!(matches!(dispatch(command, &state).await, Response::Ok));
+        let Ok(AudioCommand::ReplacePlayback { mut chain, warmup_frames }) = rx.pop() else {
+            panic!("expected a prepared playback chain");
+        };
+        assert_eq!(chain.spatial.settings(), (1.25, 0.7));
+        assert_eq!(warmup_frames, chain.spatial.warmup_frames());
+        let neutral = SpatialEffects::default();
+        assert!(matches!(dispatch(Command::SetSpatialEffects(neutral), &state).await, Response::Ok));
+        let command = rx.pop().unwrap();
+        assert!(matches!(command, AudioCommand::SetSpatialEffects(effects) if effects == neutral));
+        crate::audio::apply_command(&mut chain, command);
+        assert_eq!(chain.spatial.settings(), (1.0, 0.0));
     }
 
     /// Write a mono float32 WAV at 48 kHz (the test chains' rate → no resample,

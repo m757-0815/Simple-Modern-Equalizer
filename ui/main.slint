@@ -315,23 +315,39 @@ component EffectSlider inherits HorizontalLayout {
     in property <string> label;
     in property <string> hint;
     in property <bool> enabled;
+    in property <int> max-percent: 100;
     in-out property <float> percent <=> slider.value;
     callback changed();
+    changed percent => { strength.value = round(root.percent); }
     spacing: 12px;
     cross-axis-alignment: center;
     Label { text: root.label; width: 170px; }
     slider := Slider {
         horizontal-stretch: 1;
         accessible-label: root.label;
-        minimum: 0; maximum: 100; step: 1;
+        minimum: 0; maximum: root.max-percent; step: 1;
         enabled: root.enabled;
         changed => { root.changed(); }
         Tooltip { text: @markdown("\{root.hint}"); }
     }
-    Label {
-        width: 48px;
-        horizontal-alignment: right;
-        text: round(root.percent) + "%";
+    HorizontalLayout {
+        horizontal-stretch: 0;
+        spacing: 4px;
+        cross-axis-alignment: center;
+        strength := SpinBox {
+            width: 76px;
+            accessible-label: root.label + " percent";
+            minimum: 0; maximum: root.max-percent;
+            value: round(root.percent);
+            enabled: root.enabled;
+            edited(value) => {
+                if value != root.percent {
+                    root.percent = value;
+                    root.changed();
+                }
+            }
+        }
+        Label { text: "%"; }
     }
 }
 
@@ -608,8 +624,10 @@ export component MainWindow inherits Window {
     private property <length> graph-axis-inset: self.narrow ? 42px : 58px;
     private property <bool> open-short-monitor;
     out property <bool> live-monitor-expanded: root.show-live-view && (!root.short || root.open-short-monitor);
-    private property <length> graph-height: (self.short
-        ? min(self.eq-plot-height, max(112, (self.height - 252px) / 1px)) : self.eq-plot-height) * 1px;
+    // Leave room for the toolbar and frequency labels in a short window.
+    private property <length> graph-height: self.short
+        ? min(self.eq-plot-height * 1px, max(88px, self.height - top-controls.height - self.page-inset - 120px))
+        : self.eq-plot-height * 1px;
     in property <string> app-version;
     in property <string> source-license;
     in property <string> license-text;
@@ -687,12 +705,7 @@ export component MainWindow inherits Window {
     in property <string> scope-status: "Waiting for output capture";
     in property <image> graph;
     in-out property <int> eq-range-db: 24;
-    in-out property <int> eq-frequency-scale-index;
     in property <[FrequencyTick]> eq-frequency-ticks;
-    pure function eq-frequency-position(log-position: float) -> float {
-        // The spectrum analyzer reports its ranges on the logarithmic axis.
-        return root.eq-frequency-scale-index == 1 ? (pow(1000, log-position) - 1) / 999 : log-position;
-    }
     in property <string> eq-bottom-db: "-24";
     in property <string> eq-top-db: "+24";
     in property <float> eq-zero-position: 0.5;
@@ -724,7 +737,9 @@ export component MainWindow inherits Window {
     in-out property <float> crossfeed-percent;
     in property <bool> crossfeed-available;
     in-out property <float> room-percent;
-    in property <bool> room-available;
+    in-out property <float> stereo-width-percent: 100;
+    in-out property <float> virtual-speakers-percent;
+    in property <bool> stereo-effects-available;
     in-out property <bool> limiter-enabled;
     in property <string> limiter-reduction-label: "0.0 dB reduction";
     in-out property <bool> show-limiter-overlay;
@@ -735,7 +750,6 @@ export component MainWindow inherits Window {
         && root.connected && !root.bypass && root.limiter-graph-label != "";
     callback change-layout(bool);
     callback change-eq-range();
-    callback change-eq-frequency-scale();
     callback save-graph-view();
     callback change-tone(float, float, float, bool);
     callback change-advanced-effects();
@@ -779,7 +793,7 @@ export component MainWindow inherits Window {
     }
     callback name-preset(bool, string) -> string;
     callback overwrite-preset() -> string;
-    private property <string> preset-overwrite-message;
+    private property <string> preset-action-message;
     private property <length> preset-menu-width;
     private property <length> preset-menu-height;
     callback assign-preset(bool);
@@ -1000,6 +1014,8 @@ export component MainWindow inherits Window {
                     for tick in root.live-frequency-ticks: GraphLabel {
                         width: 48px;
                         x: clamp(tick.position * parent.width - self.width / 2, 0px, parent.width - self.width);
+                        visible: tick.position == 0 || tick.position == 1
+                            || (self.x >= self.width && self.x + 2 * self.width <= parent.width);
                         text: tick.label;
                         horizontal-alignment: tick.position == 0 ? left : tick.position == 1 ? right : center;
                     }
@@ -1179,8 +1195,8 @@ export component MainWindow inherits Window {
                         if root.show-clipping && root.clipping: Rectangle {
                             width: parent.width; height: parent.height; clip: true;
                             for region in root.clip-regions: Rectangle {
-                                x: root.eq-frequency-position(region.start) * parent.width;
-                                width: (root.eq-frequency-position(region.end) - root.eq-frequency-position(region.start)) * parent.width;
+                                x: region.start * parent.width;
+                                width: (region.end - region.start) * parent.width;
                                 height: parent.height;
                                 background: Appearance.accent.transparentize(0.82);
                             }
@@ -1188,8 +1204,8 @@ export component MainWindow inherits Window {
                         if root.show-limiter-hit: Rectangle {
                             width: parent.width; height: parent.height; clip: true;
                             for region in root.limiter-regions: limiter-band := Rectangle {
-                                x: root.eq-frequency-position(region.start) * parent.width;
-                                width: (root.eq-frequency-position(region.end) - root.eq-frequency-position(region.start)) * parent.width;
+                                x: region.start * parent.width;
+                                width: (region.end - region.start) * parent.width;
                                 height: parent.height;
                                 background: root.limiter-color.transparentize(0.80);
                                 Rectangle {
@@ -1294,6 +1310,8 @@ export component MainWindow inherits Window {
                         for tick in root.eq-frequency-ticks: GraphLabel {
                             width: 48px;
                             x: clamp(tick.position * parent.width - self.width / 2, 0px, parent.width - self.width);
+                            visible: tick.position == 0 || tick.position == 1
+                                || (self.x >= self.width && self.x + 2 * self.width <= parent.width);
                             text: tick.label;
                             accessible-label: self.text;
                             horizontal-alignment: tick.position == 0 ? left : tick.position == 1 ? right : center;
@@ -1407,7 +1425,7 @@ export component MainWindow inherits Window {
             }
         }
         // #######################################################
-        // set headphone effects and output peak protection
+        // set stereo effects and output peak protection
         // #######################################################
 
         if root.show-advanced: advanced-panel := Panel {
@@ -1426,19 +1444,36 @@ export component MainWindow inherits Window {
                     label: "Room Amount";
                     hint: "Blend in short stereo room reflections. Saved for this output.";
                     percent <=> root.room-percent;
-                    enabled: root.connected && root.room-available;
+                    enabled: root.connected && root.stereo-effects-available;
+                    changed => { root.change-advanced-effects(); }
+                }
+                EffectSlider {
+                    label: "Stereo Width";
+                    hint: "0% mixes to mono, 100% keeps the original width, and 125% widens the stereo image.";
+                    max-percent: 125;
+                    percent <=> root.stereo-width-percent;
+                    enabled: root.connected && root.stereo-effects-available;
+                    changed => { root.change-advanced-effects(); }
+                }
+                EffectSlider {
+                    label: "Virtual Speakers";
+                    hint: "For headphones. Blend in a pair of virtual speakers in front of you. 0% turns the effect off.";
+                    percent <=> root.virtual-speakers-percent;
+                    enabled: root.connected && root.stereo-effects-available;
                     changed => { root.change-advanced-effects(); }
                 }
                 HorizontalLayout {
                     spacing: 12px;
                     cross-axis-alignment: center;
                     CheckBox {
+                        horizontal-stretch: 0;
                         text: "Output Limiter";
                         checked <=> root.limiter-enabled;
                         toggled => { root.change-advanced-effects(); }
                         Tooltip { text: @markdown("Turn down brief peaks after EQ and effects. The ceiling is −1 dBTP."); }
                     }
                     CheckBox {
+                        horizontal-stretch: 0;
                         text: "Show on EQ";
                         accessible-label: "Show limiter on EQ graph";
                         checked <=> root.show-limiter-overlay;
@@ -1446,6 +1481,7 @@ export component MainWindow inherits Window {
                         Tooltip { text: @markdown("Show limiter hits and the strongest frequencies present in the Standard EQ graph."); }
                     }
                     if root.limiter-enabled && !root.narrow: GraphLabel {
+                        horizontal-stretch: 0;
                         text: "−1 dBTP ceiling";
                     }
                     Rectangle { horizontal-stretch: 1; }
@@ -1516,6 +1552,7 @@ export component MainWindow inherits Window {
                             toggled => { root.edit-band-enabled(index, self.checked); }
                         }
                         if !root.spline-eq: Choice {
+                            accessible-name: "Band " + (index + 1) + " filter type";
                             enabled: !root.listening-to-a;
                             Tooltip { text: @markdown("Select a peak, low shelf, or high shelf filter."); }
                             width: 110px; model: ["Peak", "Low shelf", "High shelf"]; current-index: band.kind;
@@ -1568,7 +1605,7 @@ export component MainWindow inherits Window {
                 }
             }
         }
-        if !root.simple-layout && root.notice != "": Text { text: root.notice; color: Appearance.accent; wrap: word-wrap; font-size: 12px; }
+        if root.notice != "": Text { text: root.notice; color: Appearance.accent; wrap: word-wrap; font-size: 12px; }
         if root.has-now-playing && root.narrow: NowPlayingPanel {
             height: 56px;
             details: root.playback-details;
@@ -1646,7 +1683,7 @@ export component MainWindow inherits Window {
                     text: "Select Preset"; width: 108px; height: 32px;
                     Tooltip { text: @markdown("Load and manage EQ presets and output links."); }
                     clicked => {
-                        root.preset-overwrite-message = "";
+                        root.preset-action-message = "";
                         preset-menu.show();
                     }
                 }
@@ -1738,7 +1775,7 @@ export component MainWindow inherits Window {
 
     settings := PopupWindow {
         width: 420px;
-        private property <length> form-height: 449px + (root.has-login-start ? 31px : 0px)
+        private property <length> form-height: 414px + (root.has-login-start ? 31px : 0px)
             + (root.login-start-error == "" ? 0px : 36px)
             + (root.phase-mode-detail == "" ? 0px : 26px)
             + (root.phase-mode-error == "" ? 0px : 36px);
@@ -1800,23 +1837,13 @@ export component MainWindow inherits Window {
                             }
                         }
                     }
-                    HorizontalLayout {
-                        spacing: 12px;
-                        Label { text: "EQ frequency scale"; width: 136px; }
-                        Choice {
-                            accessible-name: "EQ frequency scale";
-                            model: ["Logarithmic", "Linear"];
-                            current-index <=> root.eq-frequency-scale-index;
-                            selected => { root.change-eq-frequency-scale(); root.save-graph-view(); }
-                            Tooltip { text: @markdown("Change the horizontal spacing of frequencies on the Standard EQ graph."); }
-                        }
-                    }
                     Rectangle { height: 1px; background: Graphite.divider; }
                     GraphLabel { text: "PLAYBACK"; color: Appearance.accent; }
                     HorizontalLayout {
                         spacing: 12px;
                         Label { text: "Output device"; width: 100px; }
                         Choice {
+                            accessible-name: "Output device";
                             model: root.outputs; current-index <=> root.output-index;
                             enabled: root.connected;
                             selected => { root.choose-output(self.current-index); }
@@ -2087,28 +2114,42 @@ export component MainWindow inherits Window {
         height: 180px;
         x: (root.width - self.width) / 2;
         y: (root.height - self.height) / 2;
-        close-policy: close-on-click-outside;
-        Rectangle {
-            background: Graphite.window;
-            border-color: Graphite.border;
-            border-width: 1px;
-            border-radius: 12px;
-            VerticalLayout {
-                padding: 20px;
-                spacing: 12px;
-                Text { text: root.spline-eq ? "Confirm point removal" : "Confirm band removal"; color: Graphite.text; font-size: 19px; }
-                Label { text: root.band-removal-message; wrap: word-wrap; }
-                Rectangle { vertical-stretch: 1; }
-                HorizontalLayout {
-                    spacing: 8px;
-                    Rectangle { horizontal-stretch: 1; }
-                    Button {
-                        text: "Cancel";
-                        clicked => { band-removal.close(); root.resolve-band-removal(false); }
+        close-policy: no-auto-close;
+        forward-focus: cancel-band-removal;
+
+        function finish(confirmed: bool) {
+            self.close();
+            root.resolve-band-removal(confirmed);
+        }
+
+        Panel {
+            FocusScope {
+                width: parent.width;
+                height: parent.height;
+                capture-key-pressed(event) => {
+                    if event.text == Key.Escape {
+                        band-removal.finish(false);
+                        return accept;
                     }
-                    Button {
-                        text: "Remove";
-                        clicked => { band-removal.close(); root.resolve-band-removal(true); }
+                    return reject;
+                }
+                VerticalLayout {
+                    padding: 20px;
+                    spacing: 12px;
+                    Text { text: root.spline-eq ? "Confirm point removal" : "Confirm band removal"; color: Graphite.text; font-size: 19px; }
+                    Label { text: root.band-removal-message; wrap: word-wrap; }
+                    Rectangle { vertical-stretch: 1; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Rectangle { horizontal-stretch: 1; }
+                        cancel-band-removal := Button {
+                            text: "Cancel";
+                            clicked => { band-removal.finish(false); }
+                        }
+                        Button {
+                            text: "Remove";
+                            clicked => { band-removal.finish(true); }
+                        }
                     }
                 }
             }
@@ -2237,7 +2278,7 @@ export component MainWindow inherits Window {
                             Tooltip { text: @markdown("Replace the selected custom preset with the current Standard tuning."); }
                             clicked => {
                                 let error = root.overwrite-preset();
-                                root.preset-overwrite-message = error == "" ? "Preset updated." : error;
+                                root.preset-action-message = error == "" ? "Preset updated." : error;
                             }
                         }
                     }
@@ -2250,8 +2291,9 @@ export component MainWindow inherits Window {
                         }
                         Rectangle { horizontal-stretch: 1; }
                     }
-                    if root.preset-overwrite-message != "": Label {
-                        text: root.preset-overwrite-message;
+                    if root.preset-action-message != "": Label {
+                        text: root.preset-action-message;
+                        accessible-label: self.text;
                         overflow: elide;
                     }
                     name-form := VerticalLayout {
@@ -2264,12 +2306,16 @@ export component MainWindow inherits Window {
                             self.naming = true;
                             self.renaming = rename;
                             self.error = "";
+                            root.preset-action-message = "";
                             preset-name.text = rename && root.preset-index >= 0 ? root.presets[root.preset-index] : "";
                             preset-name.focus();
                         }
                         function submit() {
                             self.error = root.name-preset(self.renaming, preset-name.text);
-                            if (self.error == "") { self.naming = false; }
+                            if self.error == "" {
+                                root.preset-action-message = self.renaming ? "Preset renamed." : "Preset saved.";
+                                self.naming = false;
+                            }
                         }
                         spacing: 4px;
                         HorizontalLayout {
